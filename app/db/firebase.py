@@ -1,17 +1,20 @@
-import json
-from dotenv import load_dotenv
 import os
 from firebase_admin import credentials, firestore, initialize_app
-
-# Cargar variables de entorno
-load_dotenv()
+import firebase_admin
 
 def init_firebase():
     cred_path = os.getenv("FIREBASE_CRED_PATH")
-    firebase_creds_dict = json.loads(cred_path)
-    cred = credentials.Certificate(firebase_creds_dict)
-    initialize_app(cred)
+    if not cred_path:
+        raise ValueError("❌ No se encontró la variable FIREBASE_CRED_PATH. Definila antes de iniciar FastAPI.")
+
+    # Evita reinicializar Firebase cuando FastAPI hace reload
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(cred_path)
+        initialize_app(cred)
+        print(f"✅ Firebase inicializado con credencial: {cred_path}")
+    else:
+        print("⚠️ Firebase ya estaba inicializado.")
+
     return firestore.client()
 
-# Crear una instancia del cliente de Firestore
 db = init_firebase()
