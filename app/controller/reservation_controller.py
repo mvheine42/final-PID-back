@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from app.models.reservation import Reservation
 from fastapi import HTTPException
-from app.service.reservation_service import create_reservation    
+from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots
 
 def make_reservation_controller(reservation: Reservation):
     try:
@@ -20,7 +20,10 @@ def make_reservation_controller(reservation: Reservation):
             raise HTTPException(status_code=400, detail="Reservation time is required")
         if reservation.reservationTime not in valid_times:
             raise HTTPException(status_code=400, detail="Reservation time must be one of: 12:00, 13:00, 21:00, 22:00")
-
+        
+        slot_check = check_and_update_slot(reservation.reservationDate, reservation.reservationTime)
+        if "error" in slot_check:
+            raise HTTPException(status_code=400, detail=slot_check["error"])
         # 2) Preparar payload para Firestore (serializar fecha)
         payload = reservation.dict()  # o reservation.model_dump() si usás Pydantic v2
         payload["reservationDate"] = payload["reservationDate"].isoformat()  # <-- clave
@@ -36,5 +39,15 @@ def make_reservation_controller(reservation: Reservation):
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_available_slots_controller(reservation_date: str):
+    """
+    Controlador para obtener los horarios disponibles para una fecha dada.
+    """
+    try:
+        slots = get_available_slots(reservation_date)
+        return slots
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
