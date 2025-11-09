@@ -79,3 +79,32 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
 
     except Exception as e:
         return {"error": str(e)}
+
+def available_tables_for_reservation_service(reservation_id: int):
+    try:
+        # 1) Leer reserva para conocer amountOfPeople
+        res_ref = db.collection("reservations").document(str(reservation_id))
+        res_doc = res_ref.get()
+        if not res_doc.exists:
+            return {"error": "Reservation not found"}
+        party = int(res_doc.to_dict().get("amountOfPeople", 0))
+
+        # 2) Traer mesas FREE y filtrar por capacidad en código
+        tables_ref = db.collection("tables").where("status", "==", "FREE")
+        docs = tables_ref.stream()
+
+        items = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if int(data.get("capacity", 0)) >= party:
+                items.append({
+                    "id": int(doc.id) if str(doc.id).isdigit() else doc.id,
+                    "capacity": int(data.get("capacity", 0)),
+                    "status": data.get("status", ""),
+                    "order_id": data.get("order_id", 0),
+                    "current_reservation_id": data.get("current_reservation_id", 0),
+                })
+        return items
+    except Exception as e:
+        return {"error": str(e)}

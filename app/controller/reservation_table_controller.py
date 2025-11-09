@@ -5,7 +5,7 @@ from app.models.table import Table
 from fastapi import HTTPException
 from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots
 from app.service.table_service import associate_order_with_table, clean_table_service, close_table_service, get_tables_service, get_table_by_id, update_table_status
-from app.service.reservation_table_service import assign_reservation_to_table_service
+from app.service.reservation_table_service import assign_reservation_to_table_service, available_tables_for_reservation_service
 
 def assign_reservation_to_table_controller(table_id: str, reservation_id: int):
     """
@@ -25,6 +25,20 @@ def assign_reservation_to_table_controller(table_id: str, reservation_id: int):
         if err in ("TABLE_BUSY", "TABLE_RESERVED_OTHER"):
             raise HTTPException(status_code=409, detail=err)
         # fallback
+        raise HTTPException(status_code=400, detail=err)
+
+    return result
+
+def get_available_tables_for_reservation_controller(reservation_id: int):
+    """
+    Obtiene las mesas disponibles que pueden alojar la reserva `reservation_id`.
+    """
+    result = available_tables_for_reservation_service(reservation_id)
+
+    if "error" in result:
+        err = result["error"]
+        if err == "Reservation not found":
+            raise HTTPException(status_code=404, detail=err)
         raise HTTPException(status_code=400, detail=err)
 
     return result

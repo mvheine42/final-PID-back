@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from app.models.reservation import Reservation
 from fastapi import HTTPException
-from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots
+from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots, get_reservations_by_day
 
 def make_reservation_controller(reservation: Reservation):
     try:
@@ -49,5 +49,16 @@ def get_available_slots_controller(reservation_date: str):
     try:
         slots = get_available_slots(reservation_date)
         return slots
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+def get_reservations_by_day_controller(reservation_date: str):
+    try:
+        if len(reservation_date) != 10 or reservation_date[4] != "-" or reservation_date[7] != "-":
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD.")
+        response = get_reservations_by_day(reservation_date)
+        return response
+    except HTTPException as e:
+        raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

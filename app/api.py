@@ -12,8 +12,8 @@ from app.controller.category_controller import delete_category_controller, get_a
 from app.controller.table_controller import associate_order_with_table_controller, clean_table_controller, close_table_controller, get_table_by_id_controller, get_tables_controller, update_table_status_controller
 from app.controller.order_controller import assign_employee_to_order_controller, assign_order_to_table_controller, delete_order_items_controller, get_average_per_order_controller, get_average_per_person_controller, get_months_revenue, register_new_order, finalize_order_controller, get_orders, get_order_controller, add_order_items
 from app.controller.goal_controller import create_goal_controller, goals_controller
-from app.controller.reservation_controller import make_reservation_controller, get_available_slots_controller
-from app.controller.reservation_table_controller import assign_reservation_to_table_controller
+from app.controller.reservation_controller import make_reservation_controller, get_available_slots_controller, get_reservations_by_day_controller
+from app.controller.reservation_table_controller import assign_reservation_to_table_controller, get_available_tables_for_reservation_controller
 from app.models.order_item import OrderItem
 from app.models.table import Table
 
@@ -272,6 +272,16 @@ async def make_reservation(reservation: Reservation):
 async def get_available_slots(reservation_date: str):
     return get_available_slots_controller(reservation_date)
 
+@router.get("/reservations/day/{reservation_date}")
+async def get_reservations_by_day(reservation_date: str):
+    return get_reservations_by_day_controller(reservation_date)
+
+#-----------------------------RESERVATION-TABLE-------------------------------------
+
 @router.post("/assign-reservation-to-table/{table_id}/{reservation_id}")
 async def assign_reservation_to_table(table_id: str, reservation_id: int):
     return assign_reservation_to_table_controller(table_id, reservation_id)
+
+@router.get("/tables-available-for-reservation/{reservation_id}")
+async def get_available_tables_for_reservation(reservation_id: int):
+    return get_available_tables_for_reservation_controller(reservation_id)

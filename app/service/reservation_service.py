@@ -104,3 +104,26 @@ def get_available_slots(reservation_date):
 
     except Exception as e:
         return {"error": str(e)}
+    
+def get_reservations_by_day(reservation_date: str):
+    """
+    Servicio para obtener las reservas de un día específico (YYYY-MM-DD).
+    """
+    try:
+        reservations_ref = db.collection("reservations")
+        query = reservations_ref.where("reservationDate", "==", reservation_date)
+        docs = query.stream()
+
+        reservations = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = int(doc.id) if doc.id.isdigit() else doc.id
+            # Si no tiene mesa asignada, dejar campo vacío en lugar de None
+            data["table_id"] = data.get("table_id", "")
+            reservations.append(data)
+
+        return reservations
+
+    except Exception as e:
+        return {"error": f"Error al obtener reservas para {reservation_date}: {str(e)}"}
+    
