@@ -48,9 +48,20 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
         res_doc = res_ref.get()
         if not res_doc.exists:
             return {"error": "Reservation not found"}
+    
         
-        #Verify capacity and amountOfPeople
+        #Verify capacity and amountOfPeople and if reservation already has a table assigned
         reservation = res_doc.to_dict()
+        existing_table_id = reservation.get("table_id", "")
+        if existing_table_id not in ("", None, 0):
+            # mismo id → podríamos tratarlo como idempotente, pero ya lo manejamos
+            # más arriba con el estado de la mesa; acá sólo bloqueamos si es OTRA.
+            if str(existing_table_id) != str(table_id):
+                return {
+                    "error": "Reservation already has a table assigned",
+                    "current_table_id": existing_table_id,
+                }
+
         amount_of_people = reservation.get("amountOfPeople", 0)
         table_capacity = table.get("capacity", 0)
         if amount_of_people > table_capacity:
@@ -80,31 +91,65 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
     except Exception as e:
         return {"error": str(e)}
 
+# en tu backend (firebase)
 def available_tables_for_reservation_service(reservation_id: int):
     try:
-        # 1) Leer reserva para conocer amountOfPeople
+        # 1) Leer reserva para conocer amountOfPeople y si ya tiene mesa
         res_ref = db.collection("reservations").document(str(reservation_id))
         res_doc = res_ref.get()
         if not res_doc.exists:
             return {"error": "Reservation not found"}
-        party = int(res_doc.to_dict().get("amountOfPeople", 0))
+        
+        reservation = res_doc.to_dict()
+        party = int(reservation.get("amountOfPeople", 0))
+        # Capturamos la mesa actual
+        current_table_id = reservation.get("table_id") 
 
-        # 2) Traer mesas FREE y filtrar por capacidad en código
+        # 2) Traer mesas FREE y filtrar por capacidad
         tables_ref = db.collection("tables").where("status", "==", "FREE")
         docs = tables_ref.stream()
 
         items = []
+        # Usamos un set para no duplicar si la mesa actual también está 'FREE'
+        seen_table_ids = set() 
+
         for doc in docs:
             data = doc.to_dict()
-            data["id"] = doc.id
             if int(data.get("capacity", 0)) >= party:
+                table_id_str = doc.id
+                # Asumiendo que el ID de la tabla es numérico por tu frontend
+                try: 
+                    current_id = int(table_id_str)
+                except ValueError:
+                    current_id = table_id_str
+
                 items.append({
-                    "id": int(doc.id) if str(doc.id).isdigit() else doc.id,
+                    "id": current_id,
                     "capacity": int(data.get("capacity", 0)),
                     "status": data.get("status", ""),
-                    "order_id": data.get("order_id", 0),
-                    "current_reservation_id": data.get("current_reservation_id", 0),
+                    # ... (resto de campos que necesites en el dropdown)
                 })
+                seen_table_ids.add(table_id_str)
+
+        # 3) AÑADIR LA MESA ACTUALMENTE ASIGNADA (si existe y no la hemos añadido ya)
+        if current_table_id and str(current_table_id) not in seen_table_ids:
+            table_ref = db.collection("tables").document(str(current_table_id))
+            table_doc = table_ref.get()
+            
+            if table_doc.exists:
+                data = table_doc.to_dict()
+                try:
+                    current_id = int(current_table_id)
+                except ValueError:
+                    current_id = str(current_table_id)
+
+                items.append({
+                    "id": current_id,
+                    "capacity": int(data.get("capacity", 0)),
+                    "status": data.get("status", ""),
+                    # ... (resto de campos)
+                })
+
         return items
     except Exception as e:
         return {"error": str(e)}
