@@ -47,10 +47,16 @@ def get_available_slots_controller(reservation_date: str):
     Controlador para obtener los horarios disponibles para una fecha dada.
     """
     try:
+        # --- AÑADIR ESTA VALIDACIÓN ---
+        if len(reservation_date) != 10 or reservation_date[4] != "-" or reservation_date[7] != "-":
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD.")
+        # --- FIN DE LA VALIDACIÓN ---
+        
         slots = get_available_slots(reservation_date)
         return slots
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
     
 def get_reservations_by_day_controller(reservation_date: str):
     try:

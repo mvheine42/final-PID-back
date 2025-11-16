@@ -1,11 +1,9 @@
 from app.db.firebase import db
+from datetime import datetime
 
 def assign_reservation_to_table_service(table_id: str, reservation_id: int):
     """
     Lógica de negocio para asociar reserva -> mesa.
-    Cambios:
-      - tables/{table_id}: status = "RESERVED", current_reservation_id = reservation_id
-      - (opcional recomendado) reservations/{reservation_id}: table_id = table_id
     """
     try:
         # --- 1) Leer mesa ---
@@ -40,7 +38,6 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
 
         # En este punto debe ser FREE o RESERVED sin reserva previa
         if status not in ("FREE", "RESERVED"):
-            # Por si existieran otros estados
             return {"error": f"Invalid table status '{status}' for assignment"}
 
         # --- 3) Verificar que la reserva exista ---
@@ -49,13 +46,23 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
         if not res_doc.exists:
             return {"error": "Reservation not found"}
     
-        
-        #Verify capacity and amountOfPeople and if reservation already has a table assigned
+        # --- ¡¡AQUÍ ESTÁ EL ARREGLO!! ---
+        # 1. PRIMERO definimos la variable
         reservation = res_doc.to_dict()
+
+        # 2. AHORA SÍ la usamos para la validación de fecha
+        res_date_str = reservation.get("reservationDate")
+        today_iso = datetime.now().strftime('%Y-%m-%d')
+        
+        if res_date_str != today_iso:
+            return {
+                "error": "RESERVATION_NOT_FOR_TODAY",
+                "detail": f"La reserva es para el día {res_date_str}, no para hoy ({today_iso})."
+            }
+        
+        # 3. Y la seguimos usando para el resto...
         existing_table_id = reservation.get("table_id", "")
         if existing_table_id not in ("", None, 0):
-            # mismo id → podríamos tratarlo como idempotente, pero ya lo manejamos
-            # más arriba con el estado de la mesa; acá sólo bloqueamos si es OTRA.
             if str(existing_table_id) != str(table_id):
                 return {
                     "error": "Reservation already has a table assigned",
@@ -74,7 +81,6 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
         })
 
         # (Opcional recomendado) backlink en reservation:
-        # si tu doc id de mesa es numérico, lo guardamos como int; si no, como str.
         try:
             numeric_table_id = int(table_id)
             res_ref.update({"table_id": numeric_table_id})
@@ -89,6 +95,7 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
         }
 
     except Exception as e:
+        # Esto es lo que está capturando el error de 'reservation'
         return {"error": str(e)}
 
 # en tu backend (firebase)
@@ -117,7 +124,6 @@ def available_tables_for_reservation_service(reservation_id: int):
             data = doc.to_dict()
             if int(data.get("capacity", 0)) >= party:
                 table_id_str = doc.id
-                # Asumiendo que el ID de la tabla es numérico por tu frontend
                 try: 
                     current_id = int(table_id_str)
                 except ValueError:
@@ -127,7 +133,6 @@ def available_tables_for_reservation_service(reservation_id: int):
                     "id": current_id,
                     "capacity": int(data.get("capacity", 0)),
                     "status": data.get("status", ""),
-                    # ... (resto de campos que necesites en el dropdown)
                 })
                 seen_table_ids.add(table_id_str)
 
@@ -147,7 +152,6 @@ def available_tables_for_reservation_service(reservation_id: int):
                     "id": current_id,
                     "capacity": int(data.get("capacity", 0)),
                     "status": data.get("status", ""),
-                    # ... (resto de campos)
                 })
 
         return items
