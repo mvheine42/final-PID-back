@@ -1,21 +1,17 @@
 from app.db.firebase import db
+from google.cloud import firestore # <-- ¡IMPORTANTE! Para el Increment
 
 def get_next_id_from_existing():
     """
     Obtiene el próximo ID disponible en la colección 'reservation'.
     """
     try:
-        # Obtener todos los documentos de la colección 'category'
         reservations = db.collection('reservations').stream()
-        
-        # Extraer los IDs existentes y convertirlos a enteros
         existing_ids = [int(reservation.id) for reservation in reservations if reservation.id.isdigit()]
 
         if existing_ids:
-            # Encontrar el mayor ID existente y sumar 1
             next_id = max(existing_ids) + 1
         else:
-            # Si no hay IDs, comenzamos desde 1
             next_id = 1
 
         return next_id
@@ -28,9 +24,7 @@ def create_reservation(reservation_data):
     Crea una nueva categoría asegurando que el ID no colisione con uno existente.
     """
     try:
-        # Obtén el siguiente ID disponible
         next_id = get_next_id_from_existing()
-        # Crea el nuevo documento con el ID autoincremental
         new_reservation_ref = db.collection('reservations').document(str(next_id))
         new_reservation_ref.set(reservation_data)
 
@@ -43,8 +37,11 @@ def check_and_update_slot(reservation_date, reservation_time):
     Verifica y actualiza el cupo disponible para una fecha y hora determinada.
     Devuelve un dict con 'success' o 'error'.
     """
+    #
+    # --- ACORDATE: Esta función sigue teniendo el "race condition" ---
+    # --- ¡Para la v2.0 acordate de ponerle la Transacción! ---
+    #
     try:
-        # Generar ID único del slot (YYYY-MM-DD_HH:MM)
         slot_id = f"{reservation_date.isoformat()}_{reservation_time}"
         slot_ref = db.collection("reservation_slots").document(slot_id)
         slot_doc = slot_ref.get()
@@ -56,11 +53,8 @@ def check_and_update_slot(reservation_date, reservation_time):
 
             if used >= capacity:
                 return {"error": "Horario completo"}
-
-            # Incrementar contador
             slot_ref.update({"used": used + 1})
         else:
-            # Crear nuevo slot con un cupo inicial usado
             slot_ref.set({
                 "date": reservation_date.isoformat(),
                 "time": reservation_time,
@@ -69,39 +63,32 @@ def check_and_update_slot(reservation_date, reservation_time):
             })
 
         return {"success": True}
-
     except Exception as e:
         return {"error": str(e)}
     
 def get_available_slots(reservation_date):
     """
     Obtiene los horarios disponibles para una fecha dada.
-    Devuelve una lista de horarios con cupo disponible.
     """
     try:
         allowed_times = ["12:00", "13:00", "21:00", "22:00"]
         results = []
-
         for t in allowed_times:
             slot_id = f"{reservation_date}_{t}"
             slot_ref = db.collection("reservation_slots").document(slot_id)
             slot_doc = slot_ref.get()
-
             if slot_doc.exists:
                 data = slot_doc.to_dict()
                 used = data.get("used", 0)
                 capacity = data.get("capacity", 5)
                 remaining = max(0, capacity - used)
             else:
-                remaining = 5  # Si no existe el documento, significa 0 usadas
-
+                remaining = 5
             results.append({
                 "time": t,
                 "remaining": remaining
             })
-
         return results
-
     except Exception as e:
         return {"error": str(e)}
     
@@ -113,17 +100,65 @@ def get_reservations_by_day(reservation_date: str):
         reservations_ref = db.collection("reservations")
         query = reservations_ref.where("reservationDate", "==", reservation_date)
         docs = query.stream()
-
         reservations = []
         for doc in docs:
             data = doc.to_dict()
             data["id"] = int(doc.id) if doc.id.isdigit() else doc.id
-            # Si no tiene mesa asignada, dejar campo vacío en lugar de None
             data["table_id"] = data.get("table_id", "")
             reservations.append(data)
-
         return reservations
-
     except Exception as e:
         return {"error": f"Error al obtener reservas para {reservation_date}: {str(e)}"}
-    
+
+# ---
+# --- ¡NUEVA FUNCIÓN DE CANCELACIÓN! ---
+# ---
+def cancel_reservation_service(reservation_id: int):
+    """
+    Libera todos los recursos de una reserva (mesa y cupo) y la borra.
+    """
+    try:
+        res_ref = db.collection("reservations").document(str(reservation_id))
+        res_doc = res_ref.get()
+
+        if not res_doc.exists:
+            return {"error": "Reservation not found"}
+        
+        reservation = res_doc.to_dict()
+
+        # --- 1. Liberar la Mesa (si estaba asignada) ---
+        table_id = reservation.get("table_id")
+        if table_id not in (None, "", 0):
+            table_ref = db.collection("tables").document(str(table_id))
+            table_doc = table_ref.get()
+            if table_doc.exists:
+                table_data = table_doc.to_dict()
+                # Solo la liberamos si la mesa sigue reservada para ESTA reserva
+                if table_data.get("current_reservation_id") == reservation_id:
+                    table_ref.update({
+                        "status": "FREE",
+                        "current_reservation_id": 0
+                    })
+
+        # --- 2. Devolver el Cupo al Slot ---
+        res_date = reservation.get("reservationDate")
+        res_time = reservation.get("reservationTime")
+        
+        if res_date and res_time:
+            slot_id = f"{res_date}_{res_time}"
+            slot_ref = db.collection("reservation_slots").document(slot_id)
+            slot_doc = slot_ref.get()
+            
+            if slot_doc.exists and slot_doc.to_dict().get("used", 0) > 0:
+                # Usamos Increment para restar 1 de forma segura
+                slot_ref.update({
+                    "used": firestore.Increment(-1)
+                })
+
+        # --- 3. Borrar la Reserva ---
+        res_ref.delete()
+
+        return {"message": f"Reservation {reservation_id} cancelled successfully."}
+
+    except Exception as e:
+        return {"error": str(e)}

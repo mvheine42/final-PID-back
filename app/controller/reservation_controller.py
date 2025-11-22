@@ -1,7 +1,14 @@
 from datetime import date, timedelta
 from app.models.reservation import Reservation
 from fastapi import HTTPException
-from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots, get_reservations_by_day
+# --- ¡AÑADIMOS LA NUEVA FUNCIÓN DEL SERVICIO! ---
+from app.service.reservation_service import (
+    create_reservation, 
+    check_and_update_slot, 
+    get_available_slots, 
+    get_reservations_by_day,
+    cancel_reservation_service  # <-- ¡NUEVA!
+)
 
 def make_reservation_controller(reservation: Reservation):
     try:
@@ -24,18 +31,16 @@ def make_reservation_controller(reservation: Reservation):
         slot_check = check_and_update_slot(reservation.reservationDate, reservation.reservationTime)
         if "error" in slot_check:
             raise HTTPException(status_code=400, detail=slot_check["error"])
-        # 2) Preparar payload para Firestore (serializar fecha)
-        payload = reservation.dict()  # o reservation.model_dump() si usás Pydantic v2
-        payload["reservationDate"] = payload["reservationDate"].isoformat()  # <-- clave
+        
+        payload = reservation.dict()
+        payload["reservationDate"] = payload["reservationDate"].isoformat()
 
-        # 3) Guardar
-        result = create_reservation(payload)  # este devuelve {"message": "...", "id": ...}
+        result = create_reservation(payload)
 
-        # 4) Manejo de respuesta del service
         if isinstance(result, dict) and "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])
 
-        return result  # {"message": "Reservation added successfully", "id": next_id}
+        return result
 
     except HTTPException:
         raise
@@ -47,16 +52,14 @@ def get_available_slots_controller(reservation_date: str):
     Controlador para obtener los horarios disponibles para una fecha dada.
     """
     try:
-        # --- AÑADIR ESTA VALIDACIÓN ---
+        # ¡ACORDATE DE LA VALIDACIÓN QUE AGREGAMOS ACÁ!
         if len(reservation_date) != 10 or reservation_date[4] != "-" or reservation_date[7] != "-":
             raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD.")
-        # --- FIN DE LA VALIDACIÓN ---
-        
+            
         slots = get_available_slots(reservation_date)
         return slots
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
     
 def get_reservations_by_day_controller(reservation_date: str):
     try:
@@ -66,5 +69,27 @@ def get_reservations_by_day_controller(reservation_date: str):
         return response
     except HTTPException as e:
         raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---
+# --- ¡NUEVO ENDPOINT DE CANCELACIÓN! ---
+# ---
+def cancel_reservation_controller(reservation_id: int):
+    """
+    Controlador para cancelar una reserva y liberar todos sus recursos.
+    """
+    try:
+        result = cancel_reservation_service(reservation_id)
+        
+        if "error" in result:
+            if result["error"] == "Reservation not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            else:
+                raise HTTPException(status_code=500, detail=result["error"])
+        
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

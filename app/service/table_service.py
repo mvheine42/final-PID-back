@@ -1,4 +1,5 @@
 from app.db.firebase import db
+from fastapi import HTTPException # <-- Importante, lo estabas usando
 
 def get_tables_service():
     """
@@ -9,7 +10,7 @@ def get_tables_service():
         tables = []
         for table in tables_ref:
             tab = table.to_dict()
-            tab['id'] = table.id  # Añadir el ID a la respuesta
+            tab['id'] = table.id
             tables.append(tab)
         return tables
     except Exception as e:
@@ -38,24 +39,47 @@ def update_table_status(table_id: str, new_status: str):
         except Exception as e:
             return {"error": str(e)}
 
+# ---
+# --- ¡AQUÍ ESTÁ LA FUNCIÓN CORREGIDA! ---
+# ---
 def associate_order_with_table(table_id: str, order_id: str):
     """
-    Servicio para asociar un order ID con una tabla.
+    Servicio para asociar una orden y poner la mesa en 'BUSY'.
+    Acepta mesas que estén 'FREE' (cliente sin reserva)
+    o 'RESERVED' (cliente con reserva que llegó).
     """
     try:
         table_ref = db.collection('tables').document(table_id)
-        if table_ref.get().exists:
-            table_ref.update({"order_id": str(order_id)})
-            update_table_status(table_id, "BUSY")
-            return {"message": "Order associated with table successfully"}
-        else:
+        table_doc = table_ref.get()
+
+        if not table_doc.exists:
             return {"error": "Table not found"}
+        
+        table_data = table_doc.to_dict()
+        current_status = table_data.get("status")
+
+        # --- ¡VALIDACIÓN MEJORADA! ---
+        # Solo permitimos crear órdenes si la mesa está Libre o Reservada.
+        if current_status not in ("FREE", "RESERVED"):
+            return {"error": f"La mesa está '{current_status}' y no se le puede asignar una orden."}
+        
+        # --- ¡EL "PASE" LÓGICO Y EL BUG FIX! ---
+        # Pasa a BUSY, asigna la orden, Y LIMPIA LA RESERVA.
+        table_ref.update({
+            "status": "BUSY",
+            "order_id": str(order_id),
+            "current_reservation_id": 0 # <-- ¡AQUÍ ESTÁ LA LÍNEA QUE TE FALTABA!
+        })
+        
+        return {"message": "Order associated with table successfully"}
+
     except Exception as e:
         return {"error": str(e)}
 
+
 def close_table_service(table_id: str):
     """
-    Update the status of the table to 'FREE' and set order_id to 0.
+    Pasa la mesa de 'BUSY' a 'FINISHED' y limpia el order_id.
     """
     try:
         table_ref = db.collection('tables').document(str(table_id))
@@ -64,19 +88,25 @@ def close_table_service(table_id: str):
         if not table_doc.exists:
             raise HTTPException(status_code=404, detail="Table not found")
 
-        # Update the table
+        # --- ¡VALIDACIÓN AÑADIDA! ---
+        table_data = table_doc.to_dict()
+        if table_data.get("status") != "BUSY":
+            raise HTTPException(status_code=400, detail=f"La mesa no está 'Ocupada', no se puede cerrar. Estado actual: {table_data.get('status')}")
+
         table_ref.update({
-            "status": "FINISHED",  # Set status to 'FREE'
-            "order_id": 0      # Set order_id to 0
+            "status": "FINISHED",
+            "order_id": 0
         })
 
         return {"message": "Table closed successfully"}
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 def clean_table_service(table_id: str):
     """
-    Update the status of the table to 'FREE' and set order_id to 0.
+    Pasa la mesa de 'FINISHED' a 'FREE'.
     """
     try:
         table_ref = db.collection('tables').document(str(table_id))
@@ -85,12 +115,18 @@ def clean_table_service(table_id: str):
         if not table_doc.exists:
             raise HTTPException(status_code=404, detail="Table not found")
 
-        # Update the table
+        # --- ¡VALIDACIÓN AÑADIDA! ---
+        table_data = table_doc.to_dict()
+        if table_data.get("status") != "FINISHED":
+            raise HTTPException(status_code=400, detail=f"La mesa no está 'Terminada', no se puede limpiar. Estado actual: {table_data.get('status')}")
+
         table_ref.update({
-            "status": "FREE",  # Set status to 'FREE'
-            "order_id": 0      # Set order_id to 0
+            "status": "FREE",
+            "order_id": 0
         })
 
-        return {"message": "Table closed successfully"}
+        return {"message": "Table cleaned successfully"}
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
