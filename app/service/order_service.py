@@ -3,6 +3,7 @@ from typing import Dict, List
 from app.db.firebase import db
 from app.service.table_service import get_table_by_id
 from app.models.order_item import OrderItem
+from datetime import datetime
 from fastapi import HTTPException
 
 def create_order(order_data):
@@ -74,15 +75,17 @@ def finalize_order(order_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 def get_order_by_id(order_id: str):
-    """
-    Obtiene una orden por su ID.
-    """
     try:
         order_ref = db.collection('orders').document(order_id)
         order_doc = order_ref.get()
         if not order_doc.exists:
             return None
-        return order_doc.to_dict()
+        
+        # --- AGREGAR ESTO ---
+        data = order_doc.to_dict()
+        data['id'] = order_doc.id # Inyectamos el ID en la respuesta
+        return data
+        # --------------------
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving order: {str(e)}")
@@ -353,3 +356,40 @@ def assign_employee_to_order(order_id, uid):
     except Exception as e:
         return {"error": str(e)}
 
+def serve_order_item_service(order_id: str, item_id: str):
+    try:
+        # 1. Referencia a la orden
+        order_ref = db.collection('orders').document(order_id)
+        order_doc = order_ref.get()
+        
+        if not order_doc.exists:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # 2. Obtener datos y buscar el ítem
+        order_data = order_doc.to_dict()
+        items = order_data.get("orderItems", [])
+        
+        item_found = False
+        
+        for item in items:
+            # Comparamos con el item_id único
+            if item.get("item_id") == item_id:
+                # Si ya estaba servido, avisamos (o no hacemos nada)
+                if item.get("served_at"):
+                    return {"message": "Item already served"}
+                
+                # Marcamos la hora actual
+                item["served_at"] = datetime.now().isoformat()
+                item_found = True
+                break
+        
+        if not item_found:
+            raise HTTPException(status_code=404, detail="Item not found in this order")
+
+        # 3. Guardar el array actualizado en Firestore
+        order_ref.update({"orderItems": items})
+        
+        return {"message": "Item served successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

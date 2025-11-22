@@ -88,10 +88,29 @@ def close_table_service(table_id: str):
         if not table_doc.exists:
             raise HTTPException(status_code=404, detail="Table not found")
 
-        # --- ¡VALIDACIÓN AÑADIDA! ---
         table_data = table_doc.to_dict()
         if table_data.get("status") != "BUSY":
             raise HTTPException(status_code=400, detail=f"La mesa no está 'Ocupada', no se puede cerrar. Estado actual: {table_data.get('status')}")
+
+        # --- NUEVA VALIDACIÓN DE SEGURIDAD ---
+        order_id = table_data.get("order_id")
+        if order_id:
+            # Buscamos la orden asociada
+            order_ref = db.collection('orders').document(str(order_id))
+            order_doc = order_ref.get()
+            
+            if order_doc.exists:
+                items = order_doc.to_dict().get("orderItems", [])
+                # Filtramos los que NO tienen fecha de servido
+                pending_items = [i for i in items if not i.get("served_at")]
+                
+                if pending_items:
+                    # Si quedó alguno, explotamos (Error 400)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"No se puede cerrar: Hay {len(pending_items)} ítems sin servir."
+                    )
+        # -------------------------------------
 
         table_ref.update({
             "status": "FINISHED",
@@ -99,6 +118,7 @@ def close_table_service(table_id: str):
         })
 
         return {"message": "Table closed successfully"}
+        
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
