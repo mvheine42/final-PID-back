@@ -1,5 +1,5 @@
 from typing import List
-from app.service.order_service import assign_employee_to_order, assign_order_to_table_service, create_order, delete_order_items, finalize_order, get_months_revenue_service, get_order_by_id, get_all_orders, add_items_to_order, get_average_per_person_service, get_average_per_order_service, serve_order_item_service
+from app.service.order_service import assign_employee_to_order, assign_order_to_table_service, create_order, delete_order_items, finalize_order, get_months_revenue_service, get_order_by_id, get_all_orders, add_items_to_order, get_average_per_person_service, get_average_per_order_service, serve_order_item_service, get_wait_time_by_product_service, get_wait_time_by_day_service
 from app.models.order import Order
 from app.models.order import OrderItem
 from app.controller.table_controller import associate_order_with_table_controller
@@ -209,5 +209,17 @@ def serve_order_item_controller(order_id: str, item_id: str):
         return serve_order_item_service(order_id, item_id)
     except HTTPException as e:
         raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_wait_time_by_product_controller():
+    try:
+        return get_wait_time_by_product_service()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_wait_time_by_day_controller():
+    try:
+        return get_wait_time_by_day_service()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

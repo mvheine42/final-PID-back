@@ -5,6 +5,7 @@ from app.service.table_service import get_table_by_id
 from app.models.order_item import OrderItem
 from datetime import datetime
 from fastapi import HTTPException
+from collections import defaultdict
 
 def create_order(order_data):
     try:
@@ -393,3 +394,114 @@ def serve_order_item_service(order_id: str, item_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+# ... (El resto del archivo queda igual) ...
+
+def get_wait_time_by_product_service():
+    """
+    Calcula el tiempo promedio de espera por cada producto.
+    Maneja diferencias entre UTC (Z) y hora local (Argentina).
+    """
+    try:
+        orders_ref = db.collection('orders').stream()
+        product_waits = defaultdict(list)
+
+        for order_doc in orders_ref:
+            order = order_doc.to_dict()
+            items = order.get("orderItems", [])
+
+            for item in items:
+                start_str = item.get("created_at")
+                end_str = item.get("served_at")
+                prod_name = item.get("product_name")
+
+                if start_str and end_str and prod_name:
+                    # --- PARCHE DE ZONA HORARIA (ARGENTINA) ---
+                    # Función auxiliar interna para normalizar fechas
+                    def parse_to_local(date_str):
+                        # 1. Si tiene Z, es UTC. Lo arreglamos para Python viejo y convertimos a local.
+                        if date_str.endswith('Z'):
+                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            return dt.astimezone().replace(tzinfo=None) # Convertir a local y quitar zona
+                        # 2. Si no tiene Z, asumimos que ya es local
+                        return datetime.fromisoformat(date_str)
+                    
+                    try:
+                        start_dt = parse_to_local(start_str)
+                        end_dt = parse_to_local(end_str)
+                        
+                        # Calculamos diferencia en minutos
+                        wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                        
+                        # Solo guardamos si el tiempo es lógico (mayor a 0)
+                        if wait_minutes >= 0:
+                            product_waits[prod_name].append(wait_minutes)
+                            
+                    except ValueError:
+                        continue # Si la fecha está muy rota, la saltamos
+                    # ------------------------------------------
+
+        # Calculamos el promedio final
+        averages = {}
+        for name, times in product_waits.items():
+            avg = sum(times) / len(times)
+            averages[name] = round(avg, 2)
+
+        return averages
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_wait_time_by_day_service():
+    """
+    Calcula el tiempo promedio de espera general por día.
+    """
+    try:
+        orders_ref = db.collection('orders').stream()
+        daily_waits = defaultdict(list)
+
+        for order_doc in orders_ref:
+            order = order_doc.to_dict()
+            order_date = order.get("date")
+            items = order.get("orderItems", [])
+
+            if not order_date:
+                continue
+
+            for item in items:
+                start_str = item.get("created_at")
+                end_str = item.get("served_at")
+
+                if start_str and end_str:
+                    # --- Mismo parche de zona horaria ---
+                    def parse_to_local(date_str):
+                        if date_str.endswith('Z'):
+                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            return dt.astimezone().replace(tzinfo=None)
+                        return datetime.fromisoformat(date_str)
+                    
+                    try:
+                        start_dt = parse_to_local(start_str)
+                        end_dt = parse_to_local(end_str)
+                        
+                        wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                        
+                        if wait_minutes >= 0:
+                            daily_waits[order_date].append(wait_minutes)
+                    except ValueError:
+                        continue
+                    # ------------------------------------
+
+        averages = {}
+        sorted_days = sorted(daily_waits.keys())
+        
+        for day in sorted_days:
+            times = daily_waits[day]
+            avg = sum(times) / len(times)
+            averages[day] = round(avg, 2)
+
+        return averages
+
+    except Exception as e:
+        return {"error": str(e)}
