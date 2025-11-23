@@ -106,26 +106,46 @@ def get_orders():
 
 def add_order_items(order_id: str, new_order_items_data: List[dict], total: str):
     try:
-        # Fetch the existing order
+        # 1. Obtener orden existente
         existing_order = get_order_by_id(order_id)
         if not existing_order:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # Check if the order status is 'IN PROGRESS'
+        # 2. Verificar estado
         if existing_order.get("status") != "IN PROGRESS":
             raise HTTPException(status_code=400, detail="Cannot add items to an order that is not in progress")
 
-        # Convertir los datos de la solicitud en instancias de OrderItem
+        # 3. Convertir dicts a objetos OrderItem
         new_order_items = [OrderItem(**item) for item in new_order_items_data]
 
-        # Validar que cada product_id exista en la tabla de productos
+        # 4. Validar productos (CON LA CORRECCIÓN DE ELIMINADOS)
         for item in new_order_items:
             product_id = item.product_id
-            product = product_by_id(product_id)  # Fetch product details by product_id
-            if "error" in product:
-                raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
+            product_resp = product_by_id(product_id)  # Buscamos en la DB
 
-        # Actualizar la orden con los nuevos ítems (que ya incluyen viejos y nuevos)
+            # CASO A: El producto YA NO EXISTE (fue borrado)
+            if "error" in product_resp:
+                # Si el ítem ya tiene nombre y precio (es un histórico con snapshot), lo ignoramos y seguimos.
+                if item.product_name and item.product_price:
+                    continue 
+                else:
+                    # Si no tiene datos, es un ítem NUEVO de un producto inexistente -> Error real
+                    raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
+
+            # CASO B: El producto SÍ EXISTE
+            product = product_resp.get('product', {})
+            
+            # (Opcional) Actualizamos/Refrescamos el snapshot si el producto está vivo
+            # Esto sirve para que los ítems nuevos agarren el nombre/precio actual
+            if not item.product_name:
+                item.product_name = product.get('name', 'Unknown')
+            if not item.product_price:
+                item.product_price = str(product.get('price', '0'))
+
+            # --- AQUÍ PODRÍAS AGREGAR LA VALIDACIÓN DE STOCK PARA ÍTEMS NUEVOS ---
+            # if check_stock...
+
+        # 5. Guardar cambios
         response = add_items_to_order(order_id, new_order_items, total)
         return response
     
@@ -133,7 +153,7 @@ def add_order_items(order_id: str, new_order_items_data: List[dict], total: str)
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 def delete_order_items_controller(order_id: str, order_items: List[str]):
     try:
         # Fetch the existing order
