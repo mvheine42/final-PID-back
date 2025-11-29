@@ -146,9 +146,11 @@ def get_products():
 
 def update_product_price(product_id: str, new_price):
 
+    # --- VALIDAR QUE NEW_PRICE NO ESTÉ VACÍO ---
     if new_price is None or str(new_price).strip() == "":
         raise HTTPException(status_code=400, detail="Price cannot be empty")
 
+    # --- VALIDAR FORMATO ---
     try:
         price = float(new_price)
     except (ValueError, TypeError):
@@ -160,10 +162,23 @@ def update_product_price(product_id: str, new_price):
     if price > 1_000_000:
         raise HTTPException(status_code=400, detail="Price exceeds allowed limit")
 
+
+    # --- CHECK PRODUCT EXISTS ---
     product_check = product_by_id(product_id)
     if "error" in product_check:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    # Extraer cost del producto actual
+    current_cost = float(product_check["product"]["cost"])
+
+    # --- VALIDACIÓN NUEVA ---
+    if price < current_cost:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Price cannot be lower than product cost ({current_cost})"
+        )
+
+    # --- UPDATE ---
     try:
         resp = update_product_newprice(product_id, new_price)
     except Exception as e:
@@ -173,6 +188,7 @@ def update_product_price(product_id: str, new_price):
         raise HTTPException(status_code=500, detail=resp["error"])
 
     return resp
+
 
 
 def update_product_description(product_id: str, new_description: str):

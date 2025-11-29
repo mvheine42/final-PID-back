@@ -186,18 +186,6 @@ async def get_product(product_id: str):
     return get_product_by_id(product_id)
 
 
-# Registrar categoría (PROTEGIDO) – primera definición
-@router.post("/register-category")
-async def register_category(category: Category, user=Depends(verify_token_header)):
-    return register_new_category(category)
-
-
-# Obtener productos por categoría (PÚBLICO)
-@router.get("/categories/products/{category_id}")
-async def get_products_by_category(category_id: str):
-    return get_products_by_category_controller(category_id)
-
-
 # Chequear productos en órdenes en progreso (PROTEGIDO)
 @router.get("/orders/products")
 async def check_product_in_in_progress_orders(user=Depends(verify_token_header)):
@@ -234,6 +222,11 @@ async def delete_category(category_id: str, user=Depends(verify_token_header)):
 @router.put("/categories/name/{category_id}/{new_name}")
 async def update_category_name(category_id: str, new_name: str, user=Depends(verify_token_header)):
     return update_category_name_controller(category_id, new_name)
+
+# Obtener productos por categoría (PÚBLICO)
+@router.get("/categories/products/{category_id}")
+async def get_products_by_category(category_id: str):
+    return get_products_by_category_controller(category_id)
 
 
 # ------------------------ TABLES --------------------------
@@ -379,6 +372,7 @@ async def get_average_per_order(year: str, month: str, user=Depends(verify_token
 async def get_average_per_person_monthly(user=Depends(verify_token_header)):
     return get_average_per_person_controller()
 
+# ------------------------ STOCK --------------------------
 
 # Actualizar stock (PROTEGIDO)
 @router.put("/update-stock/{product_id}/{stock}")
@@ -391,7 +385,7 @@ async def update_stock(product_id: str, stock: str, user=Depends(verify_token_he
 async def lower_stock(product_id: str, stock: str, user=Depends(verify_token_header)):
     return lower_stock_controller(product_id, stock)
 
-
+# ------------------------ LEVEL / REWARDS --------------------------
 # Rewards (PROTEGIDO)
 @router.get("/rewards/{level_id}")
 async def rewards(level_id: str, user=Depends(verify_token_header)):

@@ -1,202 +1,202 @@
 from app.db.firebase import db
-from app.models.category import Category
 from fastapi import HTTPException
 
+# -------------------------------------------------------
+#  NEXT ID
+# -------------------------------------------------------
 def get_next_id_from_existing():
     """
-    Obtiene el próximo ID disponible en la colección 'category'.
+    Devuelve el siguiente ID disponible para la colección 'category'.
     """
     try:
-        # Obtener todos los documentos de la colección 'category'
         categories = db.collection('category').stream()
-        
-        # Extraer los IDs existentes y convertirlos a enteros
-        existing_ids = [int(category.id) for category in categories if category.id.isdigit()]
-
-        if existing_ids:
-            # Encontrar el mayor ID existente y sumar 1
-            next_id = max(existing_ids) + 1
-        else:
-            # Si no hay IDs, comenzamos desde 1
-            next_id = 1
-
-        return next_id
+        existing_ids = [int(c.id) for c in categories if c.id.isdigit()]
+        return max(existing_ids) + 1 if existing_ids else 1
     except Exception as e:
-        raise Exception(f"Error retrieving next ID from existing categories: {str(e)}")
+        return {"error": f"Error retrieving next ID: {str(e)}"}
 
 
-def create_category(category_data):
+# -------------------------------------------------------
+#  CREATE CATEGORY
+# -------------------------------------------------------
+def create_category(category_data: dict):
     """
-    Crea una nueva categoría asegurando que el ID no colisione con uno existente.
+    Guarda una categoría normalizando campos básicos.
+    El controller valida reglas de negocio.
     """
     try:
-        # Obtén el siguiente ID disponible
+        if not isinstance(category_data, dict):
+            return {"error": "Invalid category data format"}
+
+        # Limpieza mínima
+        name = str(category_data.get("name", "")).strip()
+        type_value = str(category_data.get("type", "")).strip()
+
+        category_data["name"] = name
+        category_data["type"] = type_value
+
         next_id = get_next_id_from_existing()
-        # Crea el nuevo documento con el ID autoincremental
-        new_category_ref = db.collection('category').document(str(next_id))
-        new_category_ref.set(category_data)
+        if isinstance(next_id, dict) and "error" in next_id:
+            return next_id
+
+        ref = db.collection("category").document(str(next_id))
+        ref.set(category_data)
 
         return {"message": "Category added successfully", "id": next_id}
+
     except Exception as e:
         return {"error": str(e)}
 
-def register_new_category(category: Category):
-    if category.type == "Default":
-        raise HTTPException(status_code=400, detail="Cannot create a category with type 'Default'")
-    
-    response = create_category(category.dict())
-    if "error" in response:
-        raise HTTPException(status_code=500, detail=response["error"])
-    
-    return {"message": "Category registered successfully", "id": response["id"]}
 
+# -------------------------------------------------------
+#  UPDATE CATEGORY NAME
+# -------------------------------------------------------
 def update_category_name(category_id: str, new_name: str):
     try:
-        category_ref = db.collection('category').document(category_id)
-        category = category_ref.get()
-        
-        if not category.exists:
-            raise HTTPException(status_code=404, detail="Category not found")
-        
-        category_data = category.to_dict()
-        
-        if category_data['type'] == "Default":
-            raise HTTPException(status_code=400, detail="Cannot edit the name of a 'Default' category")
-        
-        # Actualizar solo el nombre de la categoría
-        category_ref.update({"name": new_name})
-        
+        ref = db.collection("category").document(category_id)
+        snap = ref.get()
+
+        if not snap.exists:
+            return {"error": "Category not found"}
+
+        data = snap.to_dict()
+
+        # No se puede editar una categoría Default
+        if data.get("type") == "Default":
+            return {"error": "Cannot edit the name of a 'Default' category"}
+
+        new_name_clean = str(new_name).strip()
+
+        ref.update({"name": new_name_clean})
+
         return {"message": "Category name updated successfully"}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e)}
 
 
+
+
+# -------------------------------------------------------
+#  GET ALL CATEGORIES
+# -------------------------------------------------------
 def get_categories():
-    """
-    Servicio para obtener todas las categorías desde Firebase.
-    """
     try:
-        categories_ref = db.collection('category').stream()
-        categories = []
-        for category in categories_ref:
-            cat = category.to_dict()
-            cat['id'] = category.id  # Añadir el ID a la respuesta
-            categories.append(cat)
-        return {"categories": categories}
+        ref = db.collection("category").stream()
+        result = []
+
+        for c in ref:
+            data = c.to_dict()
+            data["id"] = c.id
+            result.append(data)
+
+        return {"categories": result}
+
     except Exception as e:
         return {"error": str(e)}
 
+
+# -------------------------------------------------------
+#  GET CATEGORY BY ID
+# -------------------------------------------------------
 def get_category_by_id(category_id: str):
-    """
-    Servicio para obtener una categoría por su ID.
-    """
     try:
-        category_ref = db.collection('category').document(category_id).get()
-        if category_ref.exists:
-            category = category_ref.to_dict()
-            category['id'] = category_ref.id
-            return category
-        else:
-            return None  # Si la categoría no existe
+        snap = db.collection("category").document(category_id).get()
+        if not snap.exists:
+            return None
+
+        data = snap.to_dict()
+        data["id"] = snap.id
+        return data
+
     except Exception as e:
         return {"error": str(e)}
 
+
+# -------------------------------------------------------
+#  DELETE CATEGORY
+# -------------------------------------------------------
 def delete_category_by_id(category_id: str):
-    """
-    Servicio para eliminar una categoría por su ID.
-    """
     try:
-        category_ref = db.collection('category').document(category_id)
-        if category_ref.get().exists:
-            category_ref.delete()
-            return {"message": "Category deleted successfully"}
-        else:
+        ref = db.collection("category").document(category_id)
+        snap = ref.get()
+
+        # --- Check exists ---
+        if not snap.exists:
             return {"error": "Category not found"}
+
+        data = snap.to_dict()
+
+        # --- Default categories cannot be deleted ---
+        if data.get("type") == "Default":
+            return {"error": "Cannot delete a 'Default' category"}
+
+        # --- CHECK IF CATEGORY IS USED BY ANY PRODUCT ---
+        products_ref = db.collection("products").stream()
+
+        for p in products_ref:
+            p_data = p.to_dict()
+            p_cats = str(p_data.get("category", "")).split(",")
+
+            # strip whitespace and compare
+            p_cats = [c.strip() for c in p_cats if c.strip()]
+
+            if category_id in p_cats:
+                return {
+                    "error": f"Category is assigned to at least one product and cannot be deleted"
+                }
+
+        # --- Everything ok → delete ---
+        ref.delete()
+        return {"message": "Category deleted successfully"}
+
     except Exception as e:
         return {"error": str(e)}
 
-def update_category_name(category_id: str, new_name: str):
-    """
-    Servicio para actualizar el nombre de una categoría.
-    """
-    try:
-        category_ref = db.collection('category').document(category_id)
-        if category_ref.get().exists:
-            category_ref.update({"name": new_name})
-            return {"message": "Category name updated successfully"}
-        else:
-            return {"error": "Category not found"}
-    except Exception as e:
-        return {"error": str(e)}
 
+# -------------------------------------------------------
+#  CATEGORY EXISTS
+# -------------------------------------------------------
 def category_exists(category_id: int) -> bool:
-    """
-    Verifica si una categoría con el ID proporcionado existe en Firestore.
-    """
     try:
-        # Aquí suponemos que category_id es un número, así que lo usamos directamente
-        category_ref = db.collection('category').document(str(category_id))  # Si Firestore requiere un string, mantén esto
-        return category_ref.get().exists  # Devuelve True si existe, False si no
+        snap = db.collection("category").document(str(category_id)).get()
+        return snap.exists
     except Exception as e:
-        raise Exception(f"Error al verificar la categoría con ID {category_id}: {str(e)}")
+        raise Exception(f"Error checking category: {str(e)}")
 
+
+# -------------------------------------------------------
+#  CHECK MULTIPLE CATEGORIES
+# -------------------------------------------------------
 def check_multiple_categories_exist(category_str: str) -> dict:
-
-    # Separar y limpiar IDs
     category_ids = [c.strip() for c in category_str.split(",") if c.strip()]
-
     missing = []
 
     for cid in category_ids:
-        # Validar formato numérico
         if not cid.isdigit():
             missing.append(cid)
             continue
-
-        cid_int = int(cid)
-
-        # Verificar existencia real en Firebase
-        exists = category_exists(cid_int)
-        if not exists:
+        if not category_exists(int(cid)):
             missing.append(cid)
 
-    # Resultado final
     return {
         "ok": len(missing) == 0,
         "missing": missing
     }
 
 
+# -------------------------------------------------------
+#  CHECK NAME EXISTS
+# -------------------------------------------------------
 def check_category_name_exists(category_name: str) -> bool:
     """
-    Verifica si ya existe una categoría con el nombre dado en la base de datos.
+    Devuelve True si ya existe una categoría con ese nombre,
+    False si no. Si hay error de Firebase, lanza excepción.
     """
     try:
-        # Realizar una consulta en la colección 'category' para buscar coincidencias de nombre
-        categories_ref = db.collection('category')
-        matching_categories = categories_ref.where("name", "==", category_name).stream()
-
-        # Verificar si existe al menos una categoría con el mismo nombre
-        if any(matching_categories):  # Si hay categorías que coinciden
-            return True
-
-        # Si no hay coincidencias, retornamos False
-        return False
+        ref = db.collection("category").where("name", "==", category_name).stream()
+        return any(ref)
     except Exception as e:
+        # Acá preferimos explotar fuerte y que el controller lo traduzca a 500
         raise Exception(f"Error checking if category name exists: {str(e)}")
 
-
-'''def get_default_categories_service():
-    """
-    Servicio para obtener todas las categorías de tipo 'Default' desde Firebase.
-    """
-    try:
-        categories_ref = db.collection('category').where('type', '==', 'Default').stream()
-        default_categories = []
-        for category in categories_ref:
-            cat = category.to_dict()
-            cat['id'] = category.id  # Añadir el ID a la respuesta
-            default_categories.append(cat)
-        return default_categories
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving default categories: {str(e)}")'''

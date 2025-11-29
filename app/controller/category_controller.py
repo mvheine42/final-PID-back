@@ -1,116 +1,201 @@
-from app.service.category_service import check_category_name_exists, create_category, get_categories, get_category_by_id, delete_category_by_id, update_category_name
-from app.models.category import Category
 from fastapi import HTTPException
-from app.service.order_service import get_orders_by_status
+from app.models.category import Category
+from app.service.category_service import (
+    check_category_name_exists,
+    create_category,
+    get_categories,
+    get_category_by_id,
+    delete_category_by_id,
+    update_category_name,
+)
 from app.service.product_service import product_by_id
+from app.service.order_service import get_orders_by_status
 
+
+# -------------------------------------------------------
+#  REGISTER CATEGORY
+# -------------------------------------------------------
 def register_new_category(category: Category):
     """
-    Controlador que valida y registra una nueva categoría.
+    Valida y registra una nueva categoría.
+    - name obligatorio, no solo espacios, no solo números
+    - name único
+    - type siempre termina siendo 'Custom'
+    - no se permite crear categorías 'Default'
     """
-    if not isinstance(category.type, str):
-        raise HTTPException(status_code=400, detail="Category type must be a string")
-    
-    if category.type == "Default":
-        raise HTTPException(status_code=400, detail="Category type cannot be 'Default'")
-    if category.type != "Custom":
-        category.type = "Custom"
-    
-    if check_category_name_exists(category.name):
+
+    # --- NAME ---
+    if category.name is None or not str(category.name).strip():
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
+
+    name = category.name.strip()
+
+    if name.isdigit():
+        raise HTTPException(status_code=400, detail="Category name cannot be only numbers")
+
+
+    # --- NAME UNIQUE ---
+    try:
+        exists = check_category_name_exists(name)
+    except Exception as e:
+        # si Firebase falló al chequear el nombre
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if exists:
         raise HTTPException(status_code=400, detail="Category name already exists")
 
-    response = create_category(category.dict())
-    
+    # --- TYPE ---
+    # Lo que llegue en category.type lo usamos solo para bloquear 'Default'
+    incoming_type = str(category.type or "").strip()
+
+    if incoming_type.lower() == "default":
+        raise HTTPException(status_code=400, detail="Cannot create a category with type 'Default'")
+
+    # Regla de negocio: TODAS las creadas son 'Custom'
+    final_type = "Custom"
+
+    payload = {
+        "name": name,
+        "type": final_type,
+    }
+
+    # --- CREATE ---
+    try:
+        response = create_category(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
-    
+
     return {"message": "Category registered successfully", "id": response["id"]}
 
-def get_all_categories():
-    """
-    Controlador para obtener todas las categorías.
-    """
-    return get_categories()
 
+# -------------------------------------------------------
+#  GET ALL
+# -------------------------------------------------------
+def get_all_categories():
+    response = get_categories()
+
+    if "error" in response:
+        raise HTTPException(status_code=500, detail=response["error"])
+
+    return response
+
+
+# -------------------------------------------------------
+#  GET BY ID
+# -------------------------------------------------------
 def get_category_by_id_controller(category_id: str):
-    """
-    Controlador para obtener una categoría por ID.
-    """
+
+    if not category_id.isdigit():
+        raise HTTPException(status_code=400, detail="Category ID must be numeric")
+
     category = get_category_by_id(category_id)
+
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+
     return category
 
+
+# -------------------------------------------------------
+#  DELETE CATEGORY
+# -------------------------------------------------------
 def delete_category_controller(category_id: str):
-    """
-    Controlador para eliminar una categoría.
-    """
-    category = get_category_by_id(category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
 
-    if category['type'] == "Default":
-        raise HTTPException(status_code=400, detail="Cannot delete a 'Default' category")
+    # --- ID must be numeric ---
+    if not category_id.isdigit():
+        raise HTTPException(status_code=400, detail="Category ID must be numeric")
 
-    return delete_category_by_id(category_id)
+    response = delete_category_by_id(category_id)
 
+    if "error" in response:
+        msg = response["error"]
+
+        if msg == "Category not found":
+            raise HTTPException(status_code=404, detail=msg)
+
+        # Includes:
+        # - Cannot delete default
+        # - Category used by products
+        raise HTTPException(status_code=400, detail=msg)
+
+    return response
+
+
+# -------------------------------------------------------
+#  UPDATE NAME
+# -------------------------------------------------------
 def update_category_name_controller(category_id: str, new_name: str):
-    """
-    Controlador para actualizar el nombre de una categoría.
-    """
-    category = get_category_by_id(category_id)
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
 
-    if category['type'] == "Default":
-        raise HTTPException(status_code=400, detail="Cannot edit the name of a 'Default' category")
+    # --- ID debe ser numérico ---
+    if not category_id.isdigit():
+        raise HTTPException(status_code=400, detail="Category ID must be numeric")
 
-    return update_category_name(category_id, new_name)
+    # --- VALIDAR NOMBRE ---
+    if new_name is None or not str(new_name).strip():
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
 
+    new_name_clean = new_name.strip()
+
+    # No permitir solo números
+    if new_name_clean.isdigit():
+        raise HTTPException(status_code=400, detail="Category name cannot be only numbers")
+
+    if check_category_name_exists(new_name_clean):
+        raise HTTPException(status_code=400, detail="Category name already exists")
+
+    # --- EJECUTAR UPDATE ---
+    response = update_category_name(category_id, new_name_clean)
+
+    if "error" in response:
+        msg = response["error"]
+        if msg == "Category not found":
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+    return response
+
+
+
+
+# -------------------------------------------------------
+#  CATEGORY REVENUE
+# -------------------------------------------------------
 def get_category_revenue_controller():
     try:
-        orders = get_orders_by_status('FINALIZED')
+        orders = get_orders_by_status("FINALIZED")
         category_revenue = {}
 
         for order in orders:
-            for item in order['orderItems']:
-                product_id = item['product_id']
-                amount = item['amount']
+            for item in order["orderItems"]:
+                product_id = item["product_id"]
+                amount = item["amount"]
 
                 product = product_by_id(product_id)
 
-                if 'product' in product:
-                    # Extract the category from the product
-                    category = product['product'].get('category')
+                if "product" not in product:
+                    continue
 
-                    # Initialize a list to hold category IDs
-                    categories = []
+                category = product["product"].get("category", "")
+                cats = [c.strip() for c in str(category).split(",") if c.strip()]
 
-                    if isinstance(category, str):
-                        # Split the category string into a list of IDs
-                        categories = [cat.strip() for cat in category.split(',')]  # Split by commas
-                    elif isinstance(category, list):
-                        categories = category  # If it's already a list, use it directly
+                price = float(product["product"].get("price", 0))
+                cost = float(product["product"].get("cost", 0))
 
-                    for cat_id in categories:
-                        category_data = get_category_by_id_controller(cat_id.strip())  # Fetch category by ID
-                        category_name = category_data.get('name') if category_data else None
+                for cid in cats:
+                    cat = get_category_by_id(cid)
+                    if not cat:
+                        continue
 
-                        # Check if we have a valid category name
-                        if category_name:
-                            if category_name not in category_revenue:
-                                category_revenue[category_name] = 0
-                            price = float(product['product'].get('price', 0))  # Use .get() to avoid KeyError
-                            cost = float(product['product'].get('cost', 0))      # Use .get() to avoid KeyError
-                            category_revenue[category_name] += (price - cost) * amount
-                        else:
-                            print(f"Product with ID {product_id} does not have a valid category name for category ID {cat_id}.")
-                else:
-                    print(f"Product with ID {product_id} not found or does not contain valid data.")
+                    name = cat["name"]
+                    if name not in category_revenue:
+                        category_revenue[name] = 0
+
+                    category_revenue[name] += (price - cost) * amount
 
         return category_revenue
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error calculating category revenue: {str(e)}")
-
-
+        raise HTTPException(status_code=500, detail=str(e))

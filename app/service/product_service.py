@@ -192,17 +192,21 @@ def check_product_name_exists(product_name: str):
 # -------------------------------------------------------
 def get_products_by_category(category_ids_str: str):
     try:
-        category_ids = category_ids_str.split(", ")
-        ref = db.collection("products").stream()
+        # NORMALIZAR input: split POR COMA, siempre.
+        category_ids = [c.strip() for c in category_ids_str.split(",") if c.strip()]
 
+        ref = db.collection("products").stream()
         filtered = []
 
         for p in ref:
             data = p.to_dict()
             data["id"] = p.id
 
-            product_categories = str(data.get("category", "")).split(", ")
+            # NORMALIZAR categorías del producto
+            product_categories_raw = str(data.get("category", ""))
+            product_categories = [c.strip() for c in product_categories_raw.split(",") if c.strip()]
 
+            # MATCH REAL
             if any(cat in product_categories for cat in category_ids):
                 filtered.append(data)
 
