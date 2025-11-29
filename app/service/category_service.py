@@ -140,18 +140,32 @@ def category_exists(category_id: int) -> bool:
     except Exception as e:
         raise Exception(f"Error al verificar la categoría con ID {category_id}: {str(e)}")
 
-def check_multiple_categories_exist(category_str: str) -> bool:
-    try:
-        # Convertimos los IDs de string a entero
-        category_ids = [int(category_id.strip()) for category_id in category_str.split(",") if category_id.strip()]
-        print(category_ids)
-        for category_id in category_ids:
-            exists = category_exists(category_id)
-            if not exists:
-                raise Exception(f"Category with id {category_id} does not exist.")
-        return True
-    except ValueError as e:
-        raise Exception(f"Error al verificar múltiples categorías: {str(e)}")
+def check_multiple_categories_exist(category_str: str) -> dict:
+
+    # Separar y limpiar IDs
+    category_ids = [c.strip() for c in category_str.split(",") if c.strip()]
+
+    missing = []
+
+    for cid in category_ids:
+        # Validar formato numérico
+        if not cid.isdigit():
+            missing.append(cid)
+            continue
+
+        cid_int = int(cid)
+
+        # Verificar existencia real en Firebase
+        exists = category_exists(cid_int)
+        if not exists:
+            missing.append(cid)
+
+    # Resultado final
+    return {
+        "ok": len(missing) == 0,
+        "missing": missing
+    }
+
 
 def check_category_name_exists(category_name: str) -> bool:
     """

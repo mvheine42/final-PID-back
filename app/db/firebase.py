@@ -1,20 +1,41 @@
-import os
-from firebase_admin import credentials, firestore, initialize_app
+# app/db/firebase.py
+import os, json
 import firebase_admin
+from firebase_admin import credentials, firestore
 
 def init_firebase():
+    # Si ya está inicializado, devolvemos cliente
+    if firebase_admin._apps:
+        return firestore.client()
+
+    # ====== método A: JSON en variable de entorno ======
+    json_env = os.getenv("FIREBASE_CREDENTIALS_JSON")
+    if json_env:
+        try:
+            data = json.loads(json_env)
+            cred = credentials.Certificate(data)
+            firebase_admin.initialize_app(cred)
+            return firestore.client()
+        except Exception as e:
+            raise RuntimeError(f"FIREBASE_CREDENTIALS_JSON inválida: {e}")
+
+    # ====== método B: ruta al JSON ======
     cred_path = os.getenv("FIREBASE_CRED_PATH")
-    if not cred_path:
-        raise ValueError("❌ No se encontró la variable FIREBASE_CRED_PATH. Definila antes de iniciar FastAPI.")
+    if cred_path:
+        if not os.path.isabs(cred_path):
+            cred_path = os.path.abspath(cred_path)
+        if not os.path.exists(cred_path):
+            raise FileNotFoundError(f"No existe archivo de credenciales: {cred_path}")
 
-    # Evita reinicializar Firebase cuando FastAPI hace reload
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(cred_path)
-        initialize_app(cred)
-        print(f"✅ Firebase inicializado con credencial: {cred_path}")
-    else:
-        print("⚠️ Firebase ya estaba inicializado.")
+        try:
+            with open(cred_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cred = credentials.Certificate(data)
+            firebase_admin.initialize_app(cred)
+            return firestore.client()
+        except Exception as e:
+            raise RuntimeError(f"Error leyendo JSON de credenciales: {e}")
 
-    return firestore.client()
+    raise RuntimeError("Faltan credenciales Firebase. Usá FIREBASE_CREDENTIALS_JSON o FIREBASE_CRED_PATH")
 
 db = init_firebase()
