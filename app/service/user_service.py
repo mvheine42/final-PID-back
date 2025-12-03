@@ -1,4 +1,6 @@
 from app.db.firebase import db
+import firebase_admin
+from firebase_admin import auth 
 
 # Crear un nuevo usuario en Firestore
 def create_user(user_data):
@@ -19,19 +21,22 @@ def create_user(user_data):
 # Obtener un usuario por su email
 def get_user_by_email(email):
     try:
-        users_ref = db.collection('users')
-        query = users_ref.where('email', '==', email).stream()
-
-        for user in query:
-            return user.to_dict()
+        user = auth.get_user_by_email(email)
+        return {"uid": user.uid, "email": user.email}  # Retorna el UID del usuario
+    except firebase_admin.auth.UserNotFoundError:
         return None
     except Exception as e:
         return {"error": str(e)}
 
 # Función para manejar la recuperación de contraseña
 def forgot_password(email):
-    # Simulamos que mandamos un correo de recuperación
-    return {"message": f"Password reset link sent to {email}"}
+    try:
+        reset_link = auth.generate_password_reset_link(email)
+        return {"message": f"Password reset link sent to {reset_link}"}
+    except firebase_admin.auth.UserNotFoundError:
+        return {"error": "Email not found"}
+    except Exception as e:
+        return {"error": str(e)}
 
 def user_by_id(uid):
     try:
@@ -66,6 +71,7 @@ def user_by_id(uid):
 
 def delete_user(uid):
     try:
+        auth.delete_user(uid)
         user_ref = db.collection('users').document(uid)
         user_ref.delete()
         return {"message": "User deleted successfully"}
@@ -132,44 +138,46 @@ def level(level_id):
     except Exception as e:
         return {"error": str(e)}
 
-def check_level(uid):
+def check_level_service(uid):
     try:
+        if not uid:
+            raise HTTPException(status_code=400, detail="No UID provided")
+        
         # Reference to the user's document
         user_ref = db.collection('users').document(uid)
-        user_doc = user_ref.get()  # Get the document
+        user_doc = user_ref.get()
         
-        if user_doc.exists:  # Check if the document exists
-            user_data = user_doc.to_dict()  # Get data as a dictionary
+        if not user_doc.exists:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_data = user_doc.to_dict()
+        current_level = int(user_data.get("level", "1"))
+        current_global_points = int(user_data.get("globalPoints", "0"))
+        
+        # Get the points required for the next level
+        next_level_ref = db.collection("levels").document(str(current_level + 1)).get()
+        
+        if next_level_ref.exists:
+            next_level_data = next_level_ref.to_dict()
+            next_level_points_required = int(next_level_data['points'])
             
-            # Get the user's current level as a string and convert it to int
-            current_level = int(user_data.get("level", "1"))  # Default to level 1 if missing
-            current_global_points = int(user_data.get("globalPoints", "0"))  # Convert to int
-            
-            # Get the points required for the next level from the levels collection
-            next_level_ref = db.collection("levels").document(str(current_level + 1)).get()
-            
-            if next_level_ref.exists:
-                next_level_data = next_level_ref.to_dict()
-                # Convert points required for the next level to int
-                next_level_points_required = int(next_level_data['points'])  # Convert to int
-                
-                # Check if user qualifies for the next level
-                if current_global_points >= next_level_points_required:
-                    # Update user's level to the next level (convert back to string)
-                    new_level = current_level + 1
-                    user_ref.update({"level": str(new_level)})
-                    # Update the user_data to reflect the new level
-                    user_data["level"] = str(new_level)
-                    user_data["level_updated"] = True  # Flag to indicate level was updated
-                else:
-                    user_data["level_updated"] = False  # No level change
-                
-            # Return user data with level update status
-            return user_data
+            if current_global_points >= next_level_points_required:
+                new_level = current_level + 1
+                user_ref.update({"level": str(new_level)})
+                user_data["level"] = str(new_level)
+                user_data["level_updated"] = True
+            else:
+                user_data["level_updated"] = False
         else:
-            return {"error": "User not found"}
+            # No next level exists, just return current data
+            user_data["level_updated"] = False
+        
+        return user_data
+            
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 def get_top_level_status(level_id):
     try:

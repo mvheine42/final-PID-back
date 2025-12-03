@@ -389,7 +389,7 @@ def serve_order_item_controller(order_id: str, item_id: str):
             raise HTTPException(status_code=400, detail="order_id and item_id must be strings")
         
         order = get_order_by_id(order_id) 
-        if order.status != "IN PROGRESS":
+        if order.get("status") != "IN PROGRESS":
             raise HTTPException(status_code=400, detail="Order is not in progress")
 
         return serve_order_item_service(order_id, item_id)

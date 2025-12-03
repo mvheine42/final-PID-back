@@ -86,6 +86,7 @@ def get_order_by_id(order_id: str):
         # --- AGREGAR ESTO ---
         data = order_doc.to_dict()
         data['id'] = order_doc.id # Inyectamos el ID en la respuesta
+        print(data)
         return data
         # --------------------
 

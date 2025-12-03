@@ -1,4 +1,4 @@
-from app.service.user_service import check_level, create_user, get_top_level_status, get_user_by_email, forgot_password, level, ranking, reset_monthly_points, rewards, user_by_id, delete_user
+from app.service.user_service import check_level_service, create_user, get_top_level_status, get_user_by_email, forgot_password, level, ranking, reset_monthly_points, rewards, user_by_id, delete_user
 from app.models.user import TokenData, UserLogin, UserRegister, UserForgotPassword
 from firebase_admin import auth
 from fastapi import HTTPException
@@ -18,6 +18,8 @@ def token(token_data: TokenData):
         # Verificar el token enviado por el cliente
         decoded_token = auth.verify_id_token(token_data.id_token)
         uid = decoded_token['uid']
+        if not uid:
+            raise HTTPException(status_code=400, detail="Token inválido")
         return {"message": "Token verificado", "user_id": uid}
     except firebase_admin.auth.AuthError as e:
         raise HTTPException(status_code=400, detail="Token no válido o expirado")
@@ -25,7 +27,12 @@ def token(token_data: TokenData):
         raise HTTPException(status_code=400, detail=str(e))
 
 # Controlador para registrar un nuevo usuario
-def register(user: UserRegister):
+def register(user: UserRegister, auth_user):
+    token = auth_user.get("uid") or auth_user.get("sub") or auth_user.get("user_id")
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid authentication token")
+    if user.uid != token:
+        raise HTTPException(status_code=403, detail="User ID does not match token")
     response = create_user(user)
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
@@ -39,17 +46,31 @@ def handle_forgot_password(user: UserForgotPassword):
     else:
         raise HTTPException(status_code=404, detail="Email not found")
 
-def get_user_by_id(uid: str):
-    response = user_by_id(uid)
-    if "error" in response:
-        raise HTTPException(status_code=500, detail=response["error"])
-    return response
+def get_user_by_id(uid: str, user):
+    try:
+        token = (user.get("uid") or user.get("sub") or user.get("user_id") or "").strip()
+        if not token or uid != token:
+            raise HTTPException(status_code=403, detail="Forbidden: Cannot access other user's data")
+        response = user_by_id(uid)
+        if "error" in response:
+            raise HTTPException(status_code=500, detail=response["error"])
+        if not response:
+            raise HTTPException(status_code=404, detail="User not found")
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-def delete_user_by_id(uid: str):
-    response = delete_user(uid)
-    if "error" in response:
-        raise HTTPException(status_code=500, detail=response["error"])
-    return {"message": "Product deleted successfully"}
+def delete_user_by_id(uid: str, user):
+    try:
+        token = (user.get("uid") or user.get("sub") or user.get("user_id") or "").strip()
+        if not token or uid != token:
+            raise HTTPException(status_code=403, detail="Forbidden: Cannot access other user's data")
+        response = delete_user(uid)
+        if "error" in response:            
+            raise HTTPException(status_code=500, detail=response["error"])
+        return response
+    except Exception as e:    
+        raise HTTPException(status_code=500, detail=str(e))
 
 def ranking_controller():
     try: 
@@ -72,10 +93,23 @@ def level_controller(level_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def check_level_controller(uid: str):
+def check_level_controller(user):
     try:
-        response = check_level(uid)
+        token = (user.get("uid") or user.get("sub") or user.get("user_id") or "").strip()
+        
+        if not token:
+            raise HTTPException(status_code=403, detail="Forbidden: No user ID found")
+        
+        response = check_level_service(token)
+        
+        # Check if the response contains an error
+        if isinstance(response, dict) and "error" in response:
+            raise HTTPException(status_code=404, detail=response["error"])
+        
         return response
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

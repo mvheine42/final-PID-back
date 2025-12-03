@@ -111,8 +111,8 @@ async def verify_token_endpoint(token_data: TokenData, user=Depends(verify_token
 
 # Registrar usuario (PÚBLICO)
 @router.post("/register/")
-async def register_user(user: UserRegister):
-    return register(user)
+async def register_user(user_register: UserRegister, user=Depends(verify_token_header)):
+    return register(user_register, user)
 
 
 # Recuperar contraseña (PÚBLICO)
@@ -130,13 +130,13 @@ async def ranking(user=Depends(verify_token_header)):
 # Get user (PROTEGIDO)
 @router.get("/users/{uid}")
 async def get_user(uid: str, user=Depends(verify_token_header)):
-    return get_user_by_id(uid)
+    return get_user_by_id(uid, user)
 
 
 # Delete user (PROTEGIDO)
 @router.delete("/users/{uid}")
 async def delete_user(uid: str, user=Depends(verify_token_header)):
-    return delete_user_by_id(uid)
+    return delete_user_by_id(uid, user)
 
 
 # ------------------------ PRODUCTO --------------------------
@@ -415,10 +415,9 @@ async def level(level_id: str, user=Depends(verify_token_header)):
 
 
 # Check level (PROTEGIDO)
-@router.get("/check-level")
+@router.get("/check-level/")
 async def check_level(user=Depends(verify_token_header)):
-    uid = user.get("uid")
-    return check_level_controller(uid)
+    return check_level_controller(user)
 
 
 # Top level status (PROTEGIDO)
