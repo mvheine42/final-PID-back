@@ -1,182 +1,415 @@
-from typing import List
-from app.service.order_service import assign_employee_to_order, assign_order_to_table_service, create_order, delete_order_items, finalize_order, get_months_revenue_service, get_order_by_id, get_all_orders, add_items_to_order, get_average_per_person_service, get_average_per_order_service, serve_order_item_service, get_wait_time_by_product_service, get_wait_time_by_day_service
-from app.models.order import Order
-from app.models.order import OrderItem
-from app.controller.table_controller import associate_order_with_table_controller
+from zoneinfo import ZoneInfo
+from app.controller.user_controller import get_user_by_id
 from fastapi import HTTPException
+from typing import List, Dict
+from datetime import datetime
+import re
+import pytz
+
+from app.models.order import Order, OrderItem
+from app.service.order_service import (
+    assign_employee_to_order,
+    assign_order_to_table_service,
+    create_order,
+    delete_order_items,
+    finalize_order,
+    get_months_revenue_service,
+    get_order_by_id,
+    get_all_orders,
+    add_items_to_order,
+    get_average_per_person_service,
+    get_average_per_order_service,
+    serve_order_item_service,
+    get_wait_time_by_product_service,
+    get_wait_time_by_day_service,
+)
+
 from app.service.product_service import product_by_id
-from app.service.table_service import get_table_by_id, update_table_status
+from app.service.table_service import get_table_by_id
+from app.service.reservation_service import get_reservation_by_id
+from app.date_time_utils import now_ba_iso, today_ba_str, time_ba_str
 
-def register_new_order(order: Order):
-    order_data = order.dict()
 
-    # Validar que la mesa esté incluida en la orden
-    '''table_id = order_data.get('tableNumber')
-    if not table_id:
-        raise HTTPException(status_code=400, detail="Table ID is required")
+# --- ZONA HORARIA ---
+BA_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 
-    # Verificar si la mesa existe utilizando get_table_by_id directamente
-    table = get_table_by_id(str(table_id))  # Asegúrate de que sea string si es necesario
-    if not table:
-        raise HTTPException(status_code=404, detail=f"Table with ID {table_id} not found")'''
 
-    # Obtener datos de los productos desde la orden
-    order_items = order_data.get('orderItems', [])
-    if not order_items:
-        raise HTTPException(status_code=400, detail="At least one order item is required")
-
-    # verificar que el amountOfPeople sea mayor a cero pero menor a la capacity de una table
-    #amountOfPeople = order_data.get('amountOfPeople')
-    #verificar que amountOfPeople sea mayor a 0 y menor a la capacidad de una mesa
-    '''if amountOfPeople <= 0 or amountOfPeople > table.get('capacity'):
-        raise HTTPException(status_code=400, detail="Amount of people must be greater than 0 and less than or equal to the table capacity")'''
-
-    for item in order_items:
-        # Obtener product_id del item
-        product_id = item.get('product_id')
-        if not product_id:
-            raise HTTPException(status_code=400, detail="Product ID is required in the order item")
-
-        # Verificar si el producto existe en la base de datos
-        product_data = product_by_id(product_id)
-        
-        # Debugging: Print product to see its structure
-        print(f"Fetched product from database: {product_data}")
-
-        # Access the nested product fields
-        product = product_data.get('product', {})
-        if not product:
-            raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
-
-        # Validar que el nombre y precio coincidan con los de la base de datos
-        product_name = item.get('product_name')
-        product_price = item.get('product_price')
-
-        # Comparar con los valores de la base de datos
-        if product_name != product.get('name'):
-            raise HTTPException(status_code=400, detail=f"Product name for product ID {product_id} does not match")
-
-        if product_price != str(product.get('price')): 
-            raise HTTPException(status_code=400, detail=f"Product price for product ID {product_id} does not match")
-
-    # Validaciones completas, proceder a crear la orden
-    response = create_order(order_data)
-    if "error" in response:
-        raise HTTPException(status_code=500, detail=response["error"])
-    # quiero llamar a associate_order_with_table para asociar la orden con la mesa
-    '''response_table = associate_order_with_table_controller(str(table_id), str(response["order_id"]))
-    if "error" in response_table:
-        raise HTTPException(status_code=500, detail=response_table["error"])
-    #quiero retornar response_table y response juntos
-    response["table"] = response_table'''
-    return response
-
-def finalize_order_controller(order_id: str):
-    """
-    Endpoint to finalize an order by ID.
-    """
+# --- VALIDACIONES AUXILIARES ---
+def _parse_float(value: str, field_name: str) -> float:
     try:
-        # Call the service to finalize the order
-        response = finalize_order(order_id)
-        return response
-    except HTTPException as e:
-        raise e
+        return float(value)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a number")
+
+def _round2(x: float):
+    return round(x + 1e-9, 2)
+
+
+def _local_now_iso():
+    """Devuelve la fecha/hora actual en Buenos Aires en ISO8601 (sin UTC)."""
+    return datetime.now(BA_TZ).replace(microsecond=0).isoformat()
+
+
+def _make_local_datetime(date_str: str, time_str: str):
+    """Combina YYYY-MM-DD + HH:mm para generar un datetime localizado en BA."""
+    dt_str = f"{date_str} {time_str}"
+    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+    return BA_TZ.localize(dt)
+
+
+# ---------------------------------------------------------------
+#                   C R E A T E   O R D E R
+# ---------------------------------------------------------------
+def register_new_order(order: Order, user):
+    """
+    Crea una orden validando:
+      - EXTERNAL (INACTIVE + sin mesa)
+      - FREE (IN PROGRESS + mesa FREE)
+      - RESERVED (IN PROGRESS + mesa RESERVED)
+    Agrega SIEMPRE timestamps “Buenos Aires”:
+      - date  (YYYY-MM-DD)
+      - time  (HH:MM)
+      - created_at (ISO BA)
+      - para cada item: created_at (ISO BA) + served_at = None
+    """
+
+    status = (order.status or "").strip().upper()
+
+    if status not in ("INACTIVE", "IN PROGRESS"):
+        raise HTTPException(status_code=400,
+            detail="status must be 'INACTIVE' or 'IN PROGRESS' on creation")
+
+    # Validaciones básicas
+    if order.amountOfPeople < 1:
+        raise HTTPException(status_code=400,
+            detail="amountOfPeople must be >= 1")
+
+    if order.tableNumber < 0:
+        raise HTTPException(status_code=400,
+            detail="tableNumber must be >= 0")
+
+    # Tipo de orden
+    is_external = status == "INACTIVE"
+
+    order_type = None
+    table_data = None
+    reservation_data = None
+
+    # ---------------------------------------
+    #        EXTERNAL ORDER
+    # ---------------------------------------
+    if is_external:
+
+        if order.tableNumber != 0:
+            raise HTTPException(status_code=400,
+                detail="tableNumber must be 0 for external orders")
+        
+        if order.amountOfPeople not in (1, 2, 3, 4):
+            raise HTTPException(status_code=400,
+                detail="amountOfPeople must be between 1 and 4 for external orders")
+
+        if (order.employee or "").strip():
+            raise HTTPException(status_code=400,
+                detail="employee must be empty for external orders")
+
+        if not order.orderItems:
+            raise HTTPException(status_code=400,
+                detail="At least one order item is required for external orders")
+
+        order_type = "EXTERNAL"
+
+    # ---------------------------------------
+    #        INTERNAL ORDER
+    # ---------------------------------------
+    else:
+        if order.tableNumber <= 0:
+            raise HTTPException(status_code=400,
+                detail="tableNumber must be > 0 when status is IN PROGRESS")
+        
+        order.employee = user.get("uid")
+        if not order.employee:
+            raise HTTPException(status_code=400,
+                detail="Employee is required for internal orders")
+
+        table_data = get_table_by_id(str(order.tableNumber))
+        if not table_data:
+            raise HTTPException(status_code=404, detail="Table not found")
+
+        table_status = (table_data.get("status") or "").strip().upper()
+        current_res_id = table_data.get("current_reservation_id") or 0
+
+        if table_status == "FREE":
+            order_type = "FREE"
+
+            if not order.orderItems:
+                raise HTTPException(status_code=400,
+                    detail="At least one order item is required for internal FREE orders")
+            
+            table_capacity = int(table_data.get("capacity") or 0)
+            if order.amountOfPeople > table_capacity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"amountOfPeople ({order.amountOfPeople}) exceeds table capacity ({table_capacity})"
+    )
+
+        elif table_status == "RESERVED":
+            order_type = "RESERVED"
+
+            if not current_res_id:
+                raise HTTPException(status_code=400,
+                    detail="Table is RESERVED but has no current_reservation_id")
+
+            reservation_data = get_reservation_by_id(current_res_id)
+            if not reservation_data:
+                raise HTTPException(status_code=404,
+                    detail="Reservation not found for this table")
+
+            res_people = reservation_data.get("amountOfPeople")
+            if res_people is not None and res_people != order.amountOfPeople:
+                raise HTTPException(status_code=400,
+                    detail=f"amountOfPeople ({order.amountOfPeople}) does not match reservation amountOfPeople ({res_people})")
+
+            if not order.orderItems:
+                declared_total = _parse_float(order.total, "total")
+                if declared_total != 0:
+                    raise HTTPException(status_code=400,
+                        detail="total must be 0 when no orderItems are provided in RESERVED orders")
+
+        else:
+            raise HTTPException(status_code=400,
+                detail=f"Table status '{table_status}' is not valid for new orders")
+
+    # -----------------------------------------------------
+    #    VALIDACIÓN DE PRODUCTOS & TOTAL DECLARADO
+    # -----------------------------------------------------
+    computed_total = 0.0
+    if order.orderItems:
+        for raw_item in order.orderItems:
+            prod_res = product_by_id(raw_item.product_id)
+            if not isinstance(prod_res, dict) or "product" not in prod_res:
+                raise HTTPException(status_code=404,
+                    detail=f"Product with ID {raw_item.product_id} not found")
+
+            prod = prod_res["product"]
+
+            if raw_item.product_name != prod.get("name"):
+                raise HTTPException(status_code=400,
+                    detail=f"Product name for product ID {raw_item.product_id} does not match")
+
+            if raw_item.product_price != str(prod.get("price")):
+                raise HTTPException(status_code=400,
+                    detail=f"Product price for product ID {raw_item.product_id} does not match")
+
+            item_price = float(raw_item.product_price)
+            computed_total += item_price * raw_item.amount
+
+        declared_total = _parse_float(order.total, "total")
+        if _round2(declared_total) != _round2(computed_total):
+            raise HTTPException(status_code=400,
+                detail="total does not match orderItems sum")
+
+    # -----------------------------------------------------
+    #     ARMAR PAYLOAD FINAL SIEMPRE EN BA
+    # -----------------------------------------------------
+
+    ba_now_iso = now_ba_iso()          # ISO con -03:00
+    ba_date = today_ba_str()           # YYYY-MM-DD
+    ba_time = time_ba_str()            # HH:MM
+
+    data = order.dict()
+
+    data["date"] = ba_date
+    data["time"] = ba_time
+    data["created_at"] = ba_now_iso
+
+    # Timestamps de items
+    for item in data.get("orderItems", []):
+        item["created_at"] = ba_now_iso
+        item["served_at"] = None
+
+    # EXTERNAL ajustes
+    if order_type == "EXTERNAL":
+        data["tableNumber"] = 0
+        data["employee"] = ""
+
+    # Guardar
+    resp = create_order(data)
+    if isinstance(resp, dict) and "error" in resp:
+        raise HTTPException(status_code=500, detail=resp["error"])
+    
+    return resp   # order_id
+
+# ---------------------------------------------------------------
+#                    OTROS ENDPOINTS
+# ---------------------------------------------------------------
+def finalize_order_controller(order_id: str):
+    try:
+        order = get_order_by_id(order_id)
+        print(order)
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        
+        #order is a dict i need to get the status
+        order_status = (order.get("status") or "").upper()
+
+        if order_status != "IN PROGRESS":
+            raise HTTPException(status_code=400, detail="Order is not in progress")
+
+        return finalize_order(order_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def get_order_controller(order_id: str):
     try:
-        response = get_order_by_id(order_id)
-        if not response:
+        order = get_order_by_id(order_id)
+        if not order:
             raise HTTPException(status_code=404, detail="Order not found")
-        return response
-    except HTTPException as e:
-        raise e
+        return order
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def get_orders():
     try:
-        response = get_all_orders()
-        return response
-    except HTTPException as e:
-        raise e
+        return get_all_orders()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def add_order_items(order_id: str, new_order_items_data: List[dict], total: str):
+
+def add_order_items_controller(order_id: str, new_items_raw: List[dict], total: str):
+    """
+    Recibe SOLO los nuevos ítems que se agregan a la orden.
+    - A cada ítem nuevo le setea created_at con hora actual BA.
+    - Fuerza served_at = None.
+    - No toca los ítems viejos (eso lo maneja el service).
+    """
+    local_now = now_ba_iso()
+
+    if not isinstance(new_items_raw, list) or not new_items_raw:
+        raise HTTPException(status_code=400, detail="new_items must be a list woth items")
+
+    new_items: List[OrderItem] = []
+    for raw in new_items_raw:
+        data = raw.copy()
+        data["created_at"] = local_now
+        data["served_at"] = None
+        new_items.append(OrderItem(**data))
+
     try:
-        # 1. Obtener orden existente
-        existing_order = get_order_by_id(order_id)
-        if not existing_order:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        # 2. Verificar estado
-        if existing_order.get("status") != "IN PROGRESS":
-            raise HTTPException(status_code=400, detail="Cannot add items to an order that is not in progress")
-
-        # 3. Convertir dicts a objetos OrderItem
-        new_order_items = [OrderItem(**item) for item in new_order_items_data]
-
-        # 4. Validar productos (CON LA CORRECCIÓN DE ELIMINADOS)
-        for item in new_order_items:
-            product_id = item.product_id
-            product_resp = product_by_id(product_id)  # Buscamos en la DB
-
-            # CASO A: El producto YA NO EXISTE (fue borrado)
-            if "error" in product_resp:
-                # Si el ítem ya tiene nombre y precio (es un histórico con snapshot), lo ignoramos y seguimos.
-                if item.product_name and item.product_price:
-                    continue 
-                else:
-                    # Si no tiene datos, es un ítem NUEVO de un producto inexistente -> Error real
-                    raise HTTPException(status_code=404, detail=f"Product with ID {product_id} not found")
-
-            # CASO B: El producto SÍ EXISTE
-            product = product_resp.get('product', {})
-            
-            # (Opcional) Actualizamos/Refrescamos el snapshot si el producto está vivo
-            # Esto sirve para que los ítems nuevos agarren el nombre/precio actual
-            if not item.product_name:
-                item.product_name = product.get('name', 'Unknown')
-            if not item.product_price:
-                item.product_price = str(product.get('price', '0'))
-
-            # --- AQUÍ PODRÍAS AGREGAR LA VALIDACIÓN DE STOCK PARA ÍTEMS NUEVOS ---
-            # if check_stock...
-
-        # 5. Guardar cambios
-        response = add_items_to_order(order_id, new_order_items, total)
-        return response
-    
-    except HTTPException as e:
-        raise e
+        return add_items_to_order(order_id, new_items, total)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 def delete_order_items_controller(order_id: str, order_items: List[str]):
     try:
-        # Fetch the existing order
-        existing_order = get_order_by_id(order_id)
-        if not existing_order:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        # Check if the order status is 'IN PROGRESS'
-        if existing_order.get("status") != "INACTIVE":
-            raise HTTPException(status_code=400, detail="Cannot DELETE items to an order that is not in progress")
-
-        # Convertir los datos de la solicitud en instancias de OrderItem
-
-        # Actualizar la orden con los nuevos ítems (que ya incluyen viejos y nuevos)
-        response = delete_order_items(order_id, order_items)
-        return response
-    
-    except HTTPException as e:
-        raise e
+        if not order_items:
+            raise HTTPException(status_code=400, detail="order_items list cannot be empty")
+        if not isinstance(order_items, list):
+            raise HTTPException(status_code=400, detail="order_items must be a list")
+        return delete_order_items(order_id, order_items)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def assign_order_to_table_controller(order_id: str, table_id: int):
+
+    # ----------- VALIDACIONES ORDEN ------------
+    order = get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if (order.get("status") or "").upper() != "INACTIVE":
+        raise HTTPException(status_code=400, detail="Order status is not INACTIVE")
+
+    # ----------- VALIDACIONES MESA ------------
+    table = get_table_by_id(str(table_id))
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    if (table.get("status") or "").upper() != "FREE":
+        raise HTTPException(status_code=400, detail="Table status is not FREE")
+
+    # ----------- IDEMPOTENCIA ------------
+    if (
+        (order.get("status") or "").upper() == "IN PROGRESS"
+        and int(order.get("tableNumber") or 0) == int(table_id)
+        and (table.get("status") or "").upper() == "BUSY"
+        and int(table.get("order_id") or 0) == int(order_id)
+    ):
+        return {"message": "Order already assigned to table"}
+
+    # ----------- TIMESTAMP BA (USANDO SOLO TU FUNCIÓN) ------------
+    ts = now_ba_iso()
+
+    items = order.get("orderItems", [])
+    for item in items:
+        item["created_at"] = ts
+        item["served_at"] = None
+
+    # ----------- Payload final para service ------------
+    updated_order = {
+        "status": "IN PROGRESS",
+        "tableNumber": int(table_id),
+        "orderItems": items
+    }
+
+    return assign_order_to_table_service(order_id, table_id, updated_order)
+
+
+
+
+def assign_employee_to_order_controller(order_id, uid):
+    try:
+
+        return assign_employee_to_order(str(order_id), uid)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=str(e)
+        )
+
+
+
+def serve_order_item_controller(order_id: str, item_id: str):
+    try:
+        if not order_id or not item_id:
+            raise HTTPException(status_code=400, detail="order_id and item_id are required")
+        
+        if not isinstance(order_id, str) or not isinstance(item_id, str):
+            raise HTTPException(status_code=400, detail="order_id and item_id must be strings")
+        
+        order = get_order_by_id(order_id) 
+        if order.status != "IN PROGRESS":
+            raise HTTPException(status_code=400, detail="Order is not in progress")
+
+        return serve_order_item_service(order_id, item_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_wait_time_by_product_controller():
+    try:
+        return get_wait_time_by_product_service()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_wait_time_by_day_controller():
+    try:
+        return get_wait_time_by_day_service()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 def get_months_revenue():
     try:
         response = get_months_revenue_service()
@@ -185,6 +418,7 @@ def get_months_revenue():
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def get_average_per_person_controller(year: str, month: str):
     try:
@@ -195,6 +429,7 @@ def get_average_per_person_controller(year: str, month: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 def get_average_per_order_controller(year: str, month: str):
     try:
         response = get_average_per_order_service(year, month)
@@ -204,42 +439,29 @@ def get_average_per_order_controller(year: str, month: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def assign_order_to_table_controller(order_id: str, table_id: int):
-    try:
-        response = assign_order_to_table_service(order_id, table_id)
-        response2 = associate_order_with_table_controller(str(table_id), order_id)
-        response["table"] = response2
-        return response
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def register_external_order_controller(order: Order):
+    """
+    Crea exclusivamente órdenes EXTERNAL (INACTIVE + sin mesa).
+    Blindado:
+      - Si intentan mandar IN PROGRESS -> 403
+      - Si intentan mandar mesa != 0 -> se fuerza a 0
+      - Si intentan mandar employee -> se fuerza a ""
+      - Siempre timestamp BA (lo hace register_new_order)
+    """
 
-def assign_employee_to_order_controller(order_id, uid):
-    try:
-        response = assign_employee_to_order(str(order_id), uid)
-        return response
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-def serve_order_item_controller(order_id: str, item_id: str):
-    try:
-        return serve_order_item_service(order_id, item_id)
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    incoming_status = (order.status or "").strip().upper()
 
-def get_wait_time_by_product_controller():
-    try:
-        return get_wait_time_by_product_service()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Si mandan cualquier cosa que no sea INACTIVE → NO SE ACEPTA
+    if incoming_status != "INACTIVE":
+        raise HTTPException(
+            status_code=403,
+            detail="External orders cannot set status IN PROGRESS. Forbidden."
+        )
 
-def get_wait_time_by_day_controller():
-    try:
-        return get_wait_time_by_day_service()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Forzar EXTERNAL siempre
+    order.status = "INACTIVE"
+    order.tableNumber = 0
+    order.employee = ""
+
+    # El resto de validaciones y timestamps BA lo hace register_new_order
+    return register_new_order(order, order.employee)

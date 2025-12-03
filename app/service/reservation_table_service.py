@@ -157,3 +157,19 @@ def available_tables_for_reservation_service(reservation_id: int):
         return items
     except Exception as e:
         return {"error": str(e)}
+    
+def reservation_by_id_service(reservation_id: int):
+    """
+    Servicio para obtener una reserva por su ID.
+    """
+    try:
+        res_ref = db.collection("reservations").document(str(reservation_id))
+        res_doc = res_ref.get()
+        if res_doc.exists:
+            reservation = res_doc.to_dict()
+            reservation["id"] = int(res_doc.id) if res_doc.id.isdigit() else res_doc.id
+            return reservation
+        else:
+            return {"error": "Reservation not found"}
+    except Exception as e:
+        return {"error": str(e)}

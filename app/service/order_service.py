@@ -1,26 +1,26 @@
 from calendar import monthrange
 from typing import Dict, List
+from zoneinfo import ZoneInfo
 from app.db.firebase import db
 from app.service.table_service import get_table_by_id
 from app.models.order_item import OrderItem
 from datetime import datetime
+from app.date_time_utils import now_ba_iso, parse_any_iso_to_ba_naive
 from fastapi import HTTPException
 from collections import defaultdict
 
+from datetime import datetime, timedelta
+
+
 def create_order(order_data):
     try:
-        #table_id = str(order_data.get('tableNumber'))
+
         next_id = get_next_order_id_from_existing()
         # Crear una nueva orden
         orders_ref = db.collection('orders')
         new_order_ref = orders_ref.document(str(next_id))
         new_order_ref.set(order_data)  # Crear la nueva orden en Firebase
-
-        # Cambiar el estado de la mesa a 'BUSY'
-        '''print(table_id)
-        if table_id:
-            update_table_status(table_id, "BUSY")'''
-
+        
         return {
             "message": "Order created successfully",
             "order_id": next_id,  # Devuelve el ID de la nueva orden
@@ -28,6 +28,7 @@ def create_order(order_data):
         }
     except Exception as e:
         return {"error": str(e)}
+    
 
 def finalize_order(order_id: str):
     """
@@ -142,24 +143,36 @@ def update_order(order_id: str, updated_order_data: dict):
         return {"message": "Order updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 def add_items_to_order(order_id: str, new_items: List[OrderItem], total: str):
+    # 1) Traer la orden existente
     existing_order = get_order_by_id(order_id)
     if not existing_order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # Preparar los datos de la orden actualizados con los nuevos ítems (viejos y nuevos ya incluidos en 'new_items')
+
+    # 2) Ítems que ya tenía la orden (NO los tocamos)
+    existing_items = existing_order.get("orderItems", [])
+
+    # 3) Convertimos los nuevos ítems a dict
+    new_items_dicts = [item.dict() for item in new_items]
+
+    # 4) Merge: viejos + nuevos
+    merged_items = existing_items + new_items_dicts
+
+    # 5) Armamos copia para actualizar
     order_copy = existing_order.copy()
-    order_copy["orderItems"] = [item.dict() for item in new_items]  # Reemplazar directamente los ítems
-    order_copy["total"] = total  # Actualizar el total
-    
-    # Actualizar la orden en la base de datos
+    order_copy["orderItems"] = merged_items
+    order_copy["total"] = total
+
+    # 6) Persistimos en Firestore
     response = update_order(order_id, order_copy)
 
-    if "error" in response:
+    if isinstance(response, dict) and "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
-    
+
     return response
+
+
 
 def delete_order_items(order_id: str, order_items: List[str]):
     # Obtener la orden existente
@@ -314,41 +327,48 @@ def get_average_per_order_service(year: str, month: str) -> Dict[str, float]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
 
-def assign_order_to_table_service(order_id: str, table_id: int):
+def assign_order_to_table_service(order_id: str, table_id: int, updated_order: dict):
+
+    order_ref = db.collection("orders").document(str(order_id))
+    table_ref = db.collection("tables").document(str(table_id))
+
     try:
-        #el estado de a orden que me llega tiene ser "INACTIVE" porque significa que no tiene una mesa asignada, la mesa se asigna con el table_id, y deberia chequear que este free esa mesa
+        # 1) Actualiza la ORDEN
+        order_ref.update(updated_order)
 
-        #verifico que la orden exista
-        if not get_order_by_id(order_id):
-            raise HTTPException(status_code=404, detail="Order not found")
-        #verifico que tenga status inactive
-        if get_order_by_id(order_id).get("status") != "INACTIVE":
-            raise HTTPException(status_code=400, detail="Order status is not INACTIVE")
-        #verifico que la mesa exista
-        if not get_table_by_id(table_id):
-            raise HTTPException(status_code=404, detail="Table not found")
-        #verifico que la mesa tenga status FREE
-        if get_table_by_id(str(table_id)).get("status") != "FREE":
-            raise HTTPException(status_code=400, detail="Table status is not FREE")
-        #entonces ahora si puedo a la orden ponerle estado "IN PROGRESS" y asignarle el tableNumber a la orden
+        try:
+            # 2) Actualiza la MESA
+            table_ref.update({
+                "status": "BUSY",
+                "order_id": int(order_id)
+            })
 
-        order_ref = db.collection('orders').document(order_id)
-        order_ref.update({
-            "status": "IN PROGRESS",
-            "tableNumber": table_id
-        })
+        except Exception as e:
+            # Rollback
+            order_ref.update({
+                "status": "INACTIVE",
+                "tableNumber": 0
+            })
+            raise HTTPException(status_code=500, detail=f"Failed updating table: {e}")
 
-        
-
-        return {"message": "Order assigned to table successfully"}
+        return {
+            "message": "Order assigned successfully",
+            "order_id": order_id,
+            "table_id": table_id
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 def assign_employee_to_order(order_id, uid):
     order_ref = db.collection("orders").document(order_id)
+    #check if order exists
+    order_doc = order_ref.get()
+    if not order_doc.exists:
+        return HTTPException(status_code=404, detail="Order not found")
     
-    # Update the order with the employee UID
+    if order_doc.to_dict().get("employee") != "" and order_doc.to_dict().get("status") != "INACTIVE":
+        raise HTTPException(status_code=400, detail="Order already has an assigned employee")
     try:
         order_ref.update({
             "employee": uid  # Assuming you store employee's UID in the 'employee' field
@@ -359,38 +379,33 @@ def assign_employee_to_order(order_id, uid):
 
 def serve_order_item_service(order_id: str, item_id: str):
     try:
-        # 1. Referencia a la orden
         order_ref = db.collection('orders').document(order_id)
         order_doc = order_ref.get()
         
         if not order_doc.exists:
             raise HTTPException(status_code=404, detail="Order not found")
-
-        # 2. Obtener datos y buscar el ítem
+        
         order_data = order_doc.to_dict()
         items = order_data.get("orderItems", [])
-        
         item_found = False
         
         for item in items:
-            # Comparamos con el item_id único
             if item.get("item_id") == item_id:
-                # Si ya estaba servido, avisamos (o no hacemos nada)
                 if item.get("served_at"):
                     return {"message": "Item already served"}
-                
-                # Marcamos la hora actual
-                item["served_at"] = datetime.now().isoformat()
+                item["served_at"] = now_ba_iso()
                 item_found = True
                 break
         
         if not item_found:
             raise HTTPException(status_code=404, detail="Item not found in this order")
-
-        # 3. Guardar el array actualizado en Firestore
+        
         order_ref.update({"orderItems": items})
         
         return {"message": "Item served successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -398,10 +413,6 @@ def serve_order_item_service(order_id: str, item_id: str):
 # ... (El resto del archivo queda igual) ...
 
 def get_wait_time_by_product_service():
-    """
-    Calcula el tiempo promedio de espera por cada producto.
-    Maneja diferencias entre UTC (Z) y hora local (Argentina).
-    """
     try:
         orders_ref = db.collection('orders').stream()
         product_waits = defaultdict(list)
@@ -416,47 +427,26 @@ def get_wait_time_by_product_service():
                 prod_name = item.get("product_name")
 
                 if start_str and end_str and prod_name:
-                    # --- PARCHE DE ZONA HORARIA (ARGENTINA) ---
-                    # Función auxiliar interna para normalizar fechas
-                    def parse_to_local(date_str):
-                        # 1. Si tiene Z, es UTC. Lo arreglamos para Python viejo y convertimos a local.
-                        if date_str.endswith('Z'):
-                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                            return dt.astimezone().replace(tzinfo=None) # Convertir a local y quitar zona
-                        # 2. Si no tiene Z, asumimos que ya es local
-                        return datetime.fromisoformat(date_str)
-                    
                     try:
-                        start_dt = parse_to_local(start_str)
-                        end_dt = parse_to_local(end_str)
-                        
-                        # Calculamos diferencia en minutos
-                        wait_minutes = (end_dt - start_dt).total_seconds() / 60
-                        
-                        # Solo guardamos si el tiempo es lógico (mayor a 0)
-                        if wait_minutes >= 0:
-                            product_waits[prod_name].append(wait_minutes)
-                            
+                        start_dt = parse_any_iso_to_ba_naive(start_str)
+                        end_dt = parse_any_iso_to_ba_naive(end_str)
                     except ValueError:
-                        continue # Si la fecha está muy rota, la saltamos
-                    # ------------------------------------------
+                        continue
 
-        # Calculamos el promedio final
-        averages = {}
-        for name, times in product_waits.items():
-            avg = sum(times) / len(times)
-            averages[name] = round(avg, 2)
+                    wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                    if wait_minutes >= 0:
+                        product_waits[prod_name].append(wait_minutes)
 
+        averages = {
+            name: round(sum(times) / len(times), 2)
+            for name, times in product_waits.items()
+        }
         return averages
-
     except Exception as e:
         return {"error": str(e)}
 
 
 def get_wait_time_by_day_service():
-    """
-    Calcula el tiempo promedio de espera general por día.
-    """
     try:
         orders_ref = db.collection('orders').stream()
         daily_waits = defaultdict(list)
@@ -472,36 +462,23 @@ def get_wait_time_by_day_service():
             for item in items:
                 start_str = item.get("created_at")
                 end_str = item.get("served_at")
+                if not (start_str and end_str):
+                    continue
+                try:
+                    start_dt = parse_any_iso_to_ba_naive(start_str)
+                    end_dt = parse_any_iso_to_ba_naive(end_str)
+                except ValueError:
+                    continue
 
-                if start_str and end_str:
-                    # --- Mismo parche de zona horaria ---
-                    def parse_to_local(date_str):
-                        if date_str.endswith('Z'):
-                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                            return dt.astimezone().replace(tzinfo=None)
-                        return datetime.fromisoformat(date_str)
-                    
-                    try:
-                        start_dt = parse_to_local(start_str)
-                        end_dt = parse_to_local(end_str)
-                        
-                        wait_minutes = (end_dt - start_dt).total_seconds() / 60
-                        
-                        if wait_minutes >= 0:
-                            daily_waits[order_date].append(wait_minutes)
-                    except ValueError:
-                        continue
-                    # ------------------------------------
+                wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                if wait_minutes >= 0:
+                    daily_waits[order_date].append(wait_minutes)
 
         averages = {}
-        sorted_days = sorted(daily_waits.keys())
-        
-        for day in sorted_days:
+        for day in sorted(daily_waits.keys()):
             times = daily_waits[day]
-            avg = sum(times) / len(times)
-            averages[day] = round(avg, 2)
+            averages[day] = round(sum(times) / len(times), 2)
 
         return averages
-
     except Exception as e:
         return {"error": str(e)}

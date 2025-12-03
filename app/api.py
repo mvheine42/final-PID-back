@@ -65,10 +65,11 @@ from app.controller.order_controller import (
     finalize_order_controller,
     get_orders,
     get_order_controller,
-    add_order_items,
+    add_order_items_controller,
     serve_order_item_controller,
     get_wait_time_by_product_controller,
     get_wait_time_by_day_controller,
+    register_external_order_controller
 )
 from app.controller.goal_controller import create_goal_controller, goals_controller
 from app.controller.reservation_controller import (
@@ -289,13 +290,21 @@ async def orders(user=Depends(verify_token_header)):
 @router.post("/register-order")
 async def register_order(order: Order, user=Depends(verify_token_header)):
     print(order)
-    return register_new_order(order)
+    return register_new_order(order, user)
+
+# PUBLIC — External order (sin token)
+@router.post("/external-order")
+async def register_external_order(order: Order):
+    return register_external_order_controller(order)
+
 
 
 # Asignar orden a mesa (PROTEGIDO)
-@router.put("/asign-order-table/{order_id}/{table_id}")
-async def assign_order_to_table(order_id: str, table_id: int, user=Depends(verify_token_header)):
-    return assign_order_to_table_controller(order_id, table_id)
+@router.put("/assign-order-employee/{orderId}")
+async def assign_employee_to_order(orderId: str, user=Depends(verify_token_header)):
+    uid = user.get("uid")  # ← del token
+    return assign_employee_to_order_controller(orderId, uid)
+
 
 
 # Finalizar orden (PROTEGIDO) – primera definición
@@ -320,7 +329,7 @@ async def update_order_items(
     print("Request body:", body)
     new_order_items = body.get("new_order_items", [])
     total = body.get("new_order_total", "")
-    return add_order_items(order_id, new_order_items, total)
+    return add_order_items_controller(order_id, new_order_items, total)
 
 
 # Eliminar ítems de una orden (PROTEGIDO)
@@ -333,6 +342,13 @@ async def delete_order_item(order_id: str, order_items: List[str], user=Depends(
 @router.put("/orders-finalize/{order_id}")
 async def finalize_order_again(order_id: str, user=Depends(verify_token_header)):
     return finalize_order_controller(order_id)
+
+# Asignar orden a mesa (PROTEGIDO)
+@router.put("/assign-order-to-table/{order_id}/{table_id}")
+async def assign_order_to_table(order_id: str, table_id: int, user=Depends(verify_token_header)):
+    actor_uid = user.get("uid")
+    return assign_order_to_table_controller(order_id, table_id)
+
 
 
 # ------------------------ CALORIES / REPORTS --------------------------
@@ -399,8 +415,9 @@ async def level(level_id: str, user=Depends(verify_token_header)):
 
 
 # Check level (PROTEGIDO)
-@router.get("/check-level/{uid}")
-async def check_level(uid: str, user=Depends(verify_token_header)):
+@router.get("/check-level")
+async def check_level(user=Depends(verify_token_header)):
+    uid = user.get("uid")
     return check_level_controller(uid)
 
 
@@ -432,9 +449,9 @@ async def goals(month: str, year: str, user=Depends(verify_token_header)):
 
 
 # Asignar empleado a orden (PROTEGIDO)
-@router.put("/assign-order-employee/{orderId}/{uid}")
+"""@router.put("/assign-order-employee/{orderId}/{uid}")
 async def assign_employee_to_order(orderId: int, uid: str, user=Depends(verify_token_header)):
-    return assign_employee_to_order_controller(orderId, uid)
+    return assign_employee_to_order_controller(orderId, uid)"""
 
 
 # ------------------------ RESERVATION --------------------------

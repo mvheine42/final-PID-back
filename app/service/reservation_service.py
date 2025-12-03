@@ -162,3 +162,20 @@ def cancel_reservation_service(reservation_id: int):
 
     except Exception as e:
         return {"error": str(e)}
+    
+
+def get_reservation_by_id(reservation_id: int):
+    """
+    Devuelve la reserva como dict o None.
+    Nunca lanza excepción interna (solo HTTPException si se pide).
+    """
+    try:
+        ref = db.collection("reservations").document(str(reservation_id))
+        doc = ref.get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict()
+        data["id"] = reservation_id
+        return data
+    except Exception as e:
+        return {"error": str(e)}

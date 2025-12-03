@@ -10,31 +10,90 @@ from app.service.reservation_service import (
     cancel_reservation_service  # <-- ¡NUEVA!
 )
 
+from app.service.reservation_table_service import reservation_by_id_service
+
+from datetime import datetime, timedelta
+from fastapi import HTTPException
+from zoneinfo import ZoneInfo
+
+
+# IMPORTAR TUS FUNCIONES ─────────────────────────────────────
+from app.date_time_utils import (
+    now_ba,
+    parse_any_iso_to_ba_naive,
+)
+
+
 def make_reservation_controller(reservation: Reservation):
     try:
-        # 1) Validaciones
+        # 0) Normalizar la fecha usando tus utilidades
+        raw_date = reservation.reservationDate
+
+        # ───────────────────────────────────────────────
+        # STRING → usar parse_any_iso_to_ba_naive
+        # ───────────────────────────────────────────────
+        if isinstance(raw_date, str):
+            # ejemplo: "2025-12-03", "2025-12-03T00:00:00Z"
+            dt_ba = parse_any_iso_to_ba_naive(raw_date)
+            res_date = dt_ba.date()
+
+        # ───────────────────────────────────────────────
+        # datetime → pasarlo a str y parsear igual
+        # ───────────────────────────────────────────────
+        elif isinstance(raw_date, datetime):
+            # convertir a ISO y reutilizar tu parser
+            dt_ba = parse_any_iso_to_ba_naive(raw_date.isoformat())
+            res_date = dt_ba.date()
+
+        # ───────────────────────────────────────────────
+        # date → ya está listo (assume BA)
+        # ───────────────────────────────────────────────
+        elif isinstance(raw_date, date):
+            res_date = raw_date
+
+        else:
+            raise HTTPException(status_code=400, detail="Invalid reservationDate format")
+
+        # 1) Validación amountOfPeople
         if reservation.amountOfPeople < 1 or reservation.amountOfPeople > 4:
-            raise HTTPException(status_code=400, detail="Amount of people must be between 1 and 4")
+            raise HTTPException(
+                status_code=400,
+                detail="Amount of people must be between 1 and 4",
+            )
 
-        today = date.today()
-        tomorrow = today + timedelta(days=1)
-        one_month_later = tomorrow + timedelta(days=30)
-        if reservation.reservationDate < tomorrow or reservation.reservationDate > one_month_later:
-            raise HTTPException(status_code=400, detail="Reservation date must be between tomorrow and one month from tomorrow")
+        # 2) Fechas basadas en BA
+        today_ba = now_ba().date()
+        tomorrow_ba = today_ba + timedelta(days=1)
+        one_month_later_ba = tomorrow_ba + timedelta(days=30)
 
+        if res_date < tomorrow_ba or res_date > one_month_later_ba:
+            raise HTTPException(
+                status_code=400,
+                detail="Reservation date must be between tomorrow and one month from tomorrow (BA time)",
+            )
+
+        # 3) Validación de horario
         valid_times = ["12:00", "13:00", "21:00", "22:00"]
+
         if not reservation.reservationTime:
             raise HTTPException(status_code=400, detail="Reservation time is required")
+
         if reservation.reservationTime not in valid_times:
-            raise HTTPException(status_code=400, detail="Reservation time must be one of: 12:00, 13:00, 21:00, 22:00")
-        
-        slot_check = check_and_update_slot(reservation.reservationDate, reservation.reservationTime)
+            raise HTTPException(
+                status_code=400,
+                detail="Reservation time must be one of: 12:00, 13:00, 21:00, 22:00",
+            )
+
+        # 4) Chequeo de slot usando la fecha BA ya corregida
+        slot_check = check_and_update_slot(res_date, reservation.reservationTime)
         if "error" in slot_check:
             raise HTTPException(status_code=400, detail=slot_check["error"])
-        
-        payload = reservation.dict()
-        payload["reservationDate"] = payload["reservationDate"].isoformat()
 
+        # 5) Armar payload final
+        payload = reservation.dict()
+        payload["reservationDate"] = res_date.isoformat()
+
+        # 6) Crear reserva
         result = create_reservation(payload)
 
         if isinstance(result, dict) and "error" in result:
@@ -79,7 +138,11 @@ def cancel_reservation_controller(reservation_id: int):
     """
     Controlador para cancelar una reserva y liberar todos sus recursos.
     """
-    try:
+    try: 
+        reservation = reservation_by_id_service(reservation_id)
+        if not reservation:
+            raise HTTPException(status_code=404, detail="Reservation not found")
+    
         result = cancel_reservation_service(reservation_id)
         
         if "error" in result:
