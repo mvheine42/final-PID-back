@@ -28,27 +28,54 @@ def token(token_data: TokenData):
 
 # Controlador para registrar un nuevo usuario
 def register(user: UserRegister, auth_user):
+    print(f"Starting registration for user: {user.uid}")  # Debug
+    
     token = auth_user.get("uid") or auth_user.get("sub") or auth_user.get("user_id")
     if not token:
         raise HTTPException(status_code=401, detail="Invalid authentication token")
+    
     if user.uid != token:
         raise HTTPException(status_code=403, detail="User ID does not match token")
-    #verify if repeated email
-    db_user = get_user_by_email(user.email)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already in use")
+    
+    # Get email from Firebase Auth using the uid
+    try:
+        firebase_user = auth.get_user(user.uid)
+        user_email = firebase_user.email
+        print(f"Firebase user found: {user_email}")  # Debug
+    except Exception as e:
+        print(f"Error getting Firebase user: {str(e)}")  # Debug
+        raise HTTPException(status_code=400, detail=f"Could not retrieve user from Firebase Auth: {str(e)}")
+    
+    # Verify if user already exists in Firestore
+    db_user = user_by_id(user.uid)
+    print(f"DB user check result: {db_user}")  # Debug
+    
+    if db_user and "error" not in db_user:
+        raise HTTPException(status_code=400, detail="User already registered")
+    
+    if db_user and "error" in db_user:
+        raise HTTPException(status_code=500, detail=db_user["error"])
+    
+    # Create user in Firestore
     response = create_user(user)
+    print(f"Create user response: {response}")  # Debug
+    
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
+    
     return {"message": "User registered successfully"}
 
 # Controlador para recuperación de contraseña
 def handle_forgot_password(user: UserForgotPassword):
-    db_user = get_user_by_email(user.email)
-    if db_user:
-        return forgot_password(user.email)
-    else:
-        raise HTTPException(status_code=404, detail="Email not found")
+    response = forgot_password(user.email)
+    
+    if "error" in response:
+        if response["error"] == "Email not found":
+            raise HTTPException(status_code=404, detail="Email not found")
+        else:
+            raise HTTPException(status_code=500, detail=response["error"])
+    
+    return response
 
 def get_user_by_id(uid: str, user):
     try:

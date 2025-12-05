@@ -16,6 +16,7 @@ def create_user(user_data):
         })
         return {"message": "User data saved successfully"}
     except Exception as e:
+        print(f"Error creating user: {str(e)}")  # Add logging
         return {"error": str(e)}
 
 # Obtener un usuario por su email
@@ -27,17 +28,22 @@ def get_user_by_email(email):
         return None
     except Exception as e:
         return {"error": str(e)}
+    
 
 # Función para manejar la recuperación de contraseña
 def forgot_password(email):
     try:
+        # Check if user exists in Firebase Auth
+        auth.get_user_by_email(email)
+        # Generate password reset link
         reset_link = auth.generate_password_reset_link(email)
-        return {"message": f"Password reset link sent to {reset_link}"}
+        # In production, you would send this link via email
+        return {"message": "Password reset link sent", "link": reset_link}
     except firebase_admin.auth.UserNotFoundError:
         return {"error": "Email not found"}
     except Exception as e:
         return {"error": str(e)}
-
+    
 def user_by_id(uid):
     try:
         # Referencia al documento del usuario
@@ -64,7 +70,7 @@ def user_by_id(uid):
             
             return user_data  # Retornar los datos del usuario, ahora con el nivel incluido
         else:
-            return {"error": "User not found"}
+            return None  # Usuario no existe - esto es normal durante el registro
     except Exception as e:
         return {"error": str(e)}
 

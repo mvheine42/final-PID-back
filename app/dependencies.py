@@ -13,23 +13,10 @@ def verify_token(authorization: str = Header(...)):
         decoded_token = auth.verify_id_token(token)
 
         uid = decoded_token.get("uid") or decoded_token.get("user_id")
-        role = decoded_token.get("role")
-
-        # Si el token no trae role, lo buscamos en Firestore
-        if not role and uid:
-            try:
-                doc = db.collection("users").document(str(uid)).get()
-                if doc.exists:
-                    role = (doc.to_dict() or {}).get("role")
-            except:
-                pass
-
-        role_norm = (str(role).strip().upper()) if role else None
 
         return {
             **decoded_token,
             "uid": uid,
-            "role": role_norm
         }
 
     except HTTPException:
