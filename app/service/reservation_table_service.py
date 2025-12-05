@@ -1,6 +1,8 @@
 from app.db.firebase import db
 from datetime import datetime
 
+from app.date_time_utils import now_ba
+
 def assign_reservation_to_table_service(table_id: str, reservation_id: int):
     """
     Lógica de negocio para asociar reserva -> mesa.
@@ -52,7 +54,8 @@ def assign_reservation_to_table_service(table_id: str, reservation_id: int):
 
         # 2. AHORA SÍ la usamos para la validación de fecha
         res_date_str = reservation.get("reservationDate")
-        today_iso = datetime.now().strftime('%Y-%m-%d')
+        today_iso = now_ba().date().isoformat()
+
         
         if res_date_str != today_iso:
             return {

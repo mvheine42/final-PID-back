@@ -42,38 +42,43 @@ def update_table_status(table_id: str, new_status: str):
 # ---
 # --- ¡AQUÍ ESTÁ LA FUNCIÓN CORREGIDA! ---
 # ---
-def associate_order_with_table(table_id: str, order_id: str):
+def associate_order_with_table_service(table_id: str, order_id: int):
     """
     Servicio para asociar una orden y poner la mesa en 'BUSY'.
-    Acepta mesas que estén 'FREE' (cliente sin reserva)
-    o 'RESERVED' (cliente con reserva que llegó).
     """
     try:
+        print(f"🔵 SERVICE: table_id={table_id}, order_id={order_id}, type(order_id)={type(order_id)}")
+        
         table_ref = db.collection('tables').document(table_id)
         table_doc = table_ref.get()
-
+        
         if not table_doc.exists:
+            print("❌ Table not found")
             return {"error": "Table not found"}
         
         table_data = table_doc.to_dict()
         current_status = table_data.get("status")
-
-        # --- ¡VALIDACIÓN MEJORADA! ---
-        # Solo permitimos crear órdenes si la mesa está Libre o Reservada.
+        
+        print(f"🟢 Table status: {current_status}")
+        
         if current_status not in ("FREE", "RESERVED"):
             return {"error": f"La mesa está '{current_status}' y no se le puede asignar una orden."}
         
-        # --- ¡EL "PASE" LÓGICO Y EL BUG FIX! ---
-        # Pasa a BUSY, asigna la orden, Y LIMPIA LA RESERVA.
+        print(f"🟡 About to update table with order_id={order_id}")
+        
         table_ref.update({
-            "status": "BUSY",
-            "order_id": str(order_id),
-            "current_reservation_id": 0 # <-- ¡AQUÍ ESTÁ LA LÍNEA QUE TE FALTABA!
+            "order_id": order_id, 
+            "current_reservation_id": 0, 
+            "status": "BUSY"
         })
         
+        print("✅ Update successful")
         return {"message": "Order associated with table successfully"}
-
+        
     except Exception as e:
+        print(f"💥 ERROR: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 

@@ -80,10 +80,10 @@ def get_available_slots(reservation_date):
             if slot_doc.exists:
                 data = slot_doc.to_dict()
                 used = data.get("used", 0)
-                capacity = data.get("capacity", 5)
+                capacity = data.get("capacity", 4)
                 remaining = max(0, capacity - used)
             else:
-                remaining = 5
+                remaining = 4
             results.append({
                 "time": t,
                 "remaining": remaining

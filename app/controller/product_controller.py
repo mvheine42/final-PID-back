@@ -146,6 +146,9 @@ def get_products():
 
 def update_product_price(product_id: str, new_price):
 
+    if product_id is None or not str(product_id).strip():
+        raise HTTPException(status_code=400, detail="Product ID cannot be empty")
+
     # --- VALIDAR QUE NEW_PRICE NO ESTÉ VACÍO ---
     if new_price is None or str(new_price).strip() == "":
         raise HTTPException(status_code=400, detail="Price cannot be empty")
@@ -192,6 +195,9 @@ def update_product_price(product_id: str, new_price):
 
 
 def update_product_description(product_id: str, new_description: str):
+
+    if product_id is None or not str(product_id).strip():
+        raise HTTPException(status_code=400, detail="Product ID cannot be empty")
 
     if new_description is None or not str(new_description).strip():
         raise HTTPException(status_code=400, detail="Description cannot be empty")
@@ -465,6 +471,9 @@ def lower_stock_controller(product_id, stock):
     product_check = product_by_id(product_id)
     if "error" in product_check:
         raise HTTPException(status_code=404, detail="Product not found")
+    
+    if int(product_check["product"]["stock"]) < sub_units:
+        raise HTTPException(status_code=400, detail="Insufficient stock")
 
     try:
         resp = lower_stock(product_id, stock)

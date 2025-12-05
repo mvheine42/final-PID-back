@@ -8,7 +8,7 @@ import pytz
 
 from app.models.order import Order, OrderItem
 from app.service.order_service import (
-    assign_employee_to_order,
+    assign_employee_to_order_service,
     assign_order_to_table_service,
     create_order,
     delete_order_items,
@@ -291,7 +291,7 @@ def add_order_items_controller(order_id: str, new_items_raw: List[dict], total: 
     local_now = now_ba_iso()
 
     if not isinstance(new_items_raw, list) or not new_items_raw:
-        raise HTTPException(status_code=400, detail="new_items must be a list woth items")
+        raise HTTPException(status_code=400, detail="new_items must be a list with items")
 
     new_items: List[OrderItem] = []
     for raw in new_items_raw:
@@ -321,80 +321,51 @@ def delete_order_items_controller(order_id: str, order_items: List[str]):
 
 def assign_order_to_table_controller(order_id: str, table_id: int):
 
-    # ----------- VALIDACIONES ORDEN ------------
-    order = get_order_by_id(order_id)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    if (order.get("status") or "").upper() != "INACTIVE":
-        raise HTTPException(status_code=400, detail="Order status is not INACTIVE")
-
-    # ----------- VALIDACIONES MESA ------------
-    table = get_table_by_id(str(table_id))
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-
-    if (table.get("status") or "").upper() != "FREE":
-        raise HTTPException(status_code=400, detail="Table status is not FREE")
-
-    # ----------- IDEMPOTENCIA ------------
-    if (
-        (order.get("status") or "").upper() == "IN PROGRESS"
-        and int(order.get("tableNumber") or 0) == int(table_id)
-        and (table.get("status") or "").upper() == "BUSY"
-        and int(table.get("order_id") or 0) == int(order_id)
-    ):
-        return {"message": "Order already assigned to table"}
-
-    # ----------- TIMESTAMP BA (USANDO SOLO TU FUNCIÓN) ------------
-    ts = now_ba_iso()
-
-    items = order.get("orderItems", [])
-    for item in items:
-        item["created_at"] = ts
-        item["served_at"] = None
-
-    # ----------- Payload final para service ------------
-    updated_order = {
-        "status": "IN PROGRESS",
-        "tableNumber": int(table_id),
-        "orderItems": items
-    }
-
-    return assign_order_to_table_service(order_id, table_id, updated_order)
+    return assign_order_to_table_service(order_id, table_id)
 
 
 
 
-def assign_employee_to_order_controller(order_id, uid):
-    try:
-
-        return assign_employee_to_order(str(order_id), uid)
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=str(e)
-        )
+def assign_employee_to_order_controller(order_id: str, uid: str):
+    """
+    Controller just calls the service.
+    """
+    if not uid:
+        raise HTTPException(status_code=401, detail="User ID not found in token")
+    
+    return assign_employee_to_order_service(order_id, uid)
 
 
 
 def serve_order_item_controller(order_id: str, item_id: str):
     try:
+        # 1) Validaciones básicas de inputs
         if not order_id or not item_id:
             raise HTTPException(status_code=400, detail="order_id and item_id are required")
         
         if not isinstance(order_id, str) or not isinstance(item_id, str):
             raise HTTPException(status_code=400, detail="order_id and item_id must be strings")
-        
-        order = get_order_by_id(order_id) 
+
+        # 2) Verificar que la orden exista
+        try:
+            order = get_order_by_id(order_id)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        # 3) La orden debe estar IN PROGRESS
         if order.get("status") != "IN PROGRESS":
             raise HTTPException(status_code=400, detail="Order is not in progress")
 
+        # 4) Pasar al service
         return serve_order_item_service(order_id, item_id)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 def get_wait_time_by_product_controller():

@@ -245,10 +245,9 @@ async def get_table(table_id: str, user=Depends(verify_token_header)):
 
 
 # Actualizar estado de mesa (PROTEGIDO)
-@router.put("/tables/status/{table_id}")
+"""@router.put("/tables/status/{table_id}")
 async def update_table_status(table_id: str, new_status: str, user=Depends(verify_token_header)):
-    return update_table_status_controller(table_id, new_status)
-
+    return update_table_status_controller(table_id, new_status)"""
 
 # Asociar orden con mesa (PROTEGIDO)
 @router.put("/tables/order/{table_id}")
@@ -258,23 +257,13 @@ async def associate_order_with_table(table_id: str, order_id: int, user=Depends(
 
 # Cerrar mesa (PROTEGIDO)
 @router.put("/close-table/{table_id}")
-async def close_table(
-    table_id: str,
-    body: Dict[str, Union[str, int]],
-    user=Depends(verify_token_header),
-):
-    print(body)
+async def close_table(table_id: str, body: Dict[str, Union[str, int]], user=Depends(verify_token_header)):
     return close_table_controller(table_id, body)
 
 
 # Limpiar mesa (PROTEGIDO)
 @router.put("/clean-table/{table_id}")
-async def clean_table(
-    table_id: str,
-    body: Dict[str, Union[str, int]],
-    user=Depends(verify_token_header),
-):
-    print(body)
+async def clean_table(table_id: str, body: Dict[str, Union[str, int]], user=Depends(verify_token_header)):
     return clean_table_controller(table_id, body)
 
 
@@ -298,7 +287,6 @@ async def register_external_order(order: Order):
     return register_external_order_controller(order)
 
 
-
 # Asignar orden a mesa (PROTEGIDO)
 @router.put("/assign-order-employee/{orderId}")
 async def assign_employee_to_order(orderId: str, user=Depends(verify_token_header)):
@@ -308,7 +296,7 @@ async def assign_employee_to_order(orderId: str, user=Depends(verify_token_heade
 
 
 # Finalizar orden (PROTEGIDO) – primera definición
-@router.put("/orders/finalize/{order_id}")
+@router.put("/orders-finalize/{order_id}")
 async def finalize_order(order_id: str, user=Depends(verify_token_header)):
     return finalize_order_controller(order_id)
 
@@ -338,15 +326,9 @@ async def delete_order_item(order_id: str, order_items: List[str], user=Depends(
     return delete_order_items_controller(order_id, order_items)
 
 
-# Finalizar orden (PROTEGIDO) – segunda definición
-@router.put("/orders-finalize/{order_id}")
-async def finalize_order_again(order_id: str, user=Depends(verify_token_header)):
-    return finalize_order_controller(order_id)
-
 # Asignar orden a mesa (PROTEGIDO)
-@router.put("/assign-order-to-table/{order_id}/{table_id}")
+@router.put("/assign-table-and-order/{order_id}/{table_id}")
 async def assign_order_to_table(order_id: str, table_id: int, user=Depends(verify_token_header)):
-    actor_uid = user.get("uid")
     return assign_order_to_table_controller(order_id, table_id)
 
 
@@ -372,21 +354,16 @@ async def get_monthly_revenue(user=Depends(verify_token_header)):
 
 
 # Promedio por persona (PROTEGIDO)
-@router.get("/average_per_person/{year}/{month}")
+@router.get("/average-per-person/{year}/{month}")
 async def get_average_per_person(year: str, month: str, user=Depends(verify_token_header)):
     return get_average_per_person_controller(year, month)
 
 
 # Promedio por orden (PROTEGIDO)
-@router.get("/averare_per_order/{year}/{month}")
+@router.get("/average-per-order/{year}/{month}")
 async def get_average_per_order(year: str, month: str, user=Depends(verify_token_header)):
     return get_average_per_order_controller(year, month)
 
-
-# Promedio por persona mensual (PROTEGIDO)
-@router.get("/average_per_person_monthly}")
-async def get_average_per_person_monthly(user=Depends(verify_token_header)):
-    return get_average_per_person_controller()
 
 # ------------------------ STOCK --------------------------
 
@@ -483,11 +460,7 @@ async def cancel_reservation(reservation_id: int, user=Depends(verify_token_head
 
 # Asignar reserva a mesa (PROTEGIDO)
 @router.post("/assign-reservation-to-table/{table_id}/{reservation_id}")
-async def assign_reservation_to_table(
-    table_id: str,
-    reservation_id: int,
-    user=Depends(verify_token_header),
-):
+async def assign_reservation_to_table(table_id: str, reservation_id: int, user=Depends(verify_token_header)):
     return assign_reservation_to_table_controller(table_id, reservation_id)
 
 

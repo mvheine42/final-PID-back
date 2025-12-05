@@ -33,6 +33,10 @@ def register(user: UserRegister, auth_user):
         raise HTTPException(status_code=401, detail="Invalid authentication token")
     if user.uid != token:
         raise HTTPException(status_code=403, detail="User ID does not match token")
+    #verify if repeated email
+    db_user = get_user_by_email(user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already in use")
     response = create_user(user)
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])

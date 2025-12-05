@@ -4,7 +4,7 @@ from app.models.reservation import Reservation
 from app.models.table import Table
 from fastapi import HTTPException
 from app.service.reservation_service import create_reservation, check_and_update_slot, get_available_slots
-from app.service.table_service import associate_order_with_table, clean_table_service, close_table_service, get_tables_service, get_table_by_id, update_table_status
+from app.service.table_service import associate_order_with_table_service, clean_table_service, close_table_service, get_tables_service, get_table_by_id, update_table_status
 from app.service.reservation_table_service import assign_reservation_to_table_service, available_tables_for_reservation_service, reservation_by_id_service
 
 def assign_reservation_to_table_controller(table_id: str, reservation_id: int):
@@ -34,15 +34,15 @@ def assign_reservation_to_table_controller(table_id: str, reservation_id: int):
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
 
-    if table.status != "FREE":
+    if table.get("status") != "FREE":
         raise HTTPException(status_code=409, detail="Table is not FREE")
     
     reservation = reservation_by_id_service(reservation_id) 
 
-    if table.current_reservation_id != 0 and table.current_reservation_id is not None:
+    if table.get("current_reservation_id") != 0 and table.get("current_reservation_id") is not None:
         raise HTTPException(status_code=409, detail="Table is already RESERVED for another reservation")
     
-    if table.current_reservation_id == reservation_id:
+    if table.get("current_reservation_id") == reservation_id:
         return {
             "message": "Reservation already assigned to this table",
             "idempotent": True,

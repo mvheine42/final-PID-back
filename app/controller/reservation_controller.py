@@ -53,6 +53,20 @@ def make_reservation_controller(reservation: Reservation):
 
         else:
             raise HTTPException(status_code=400, detail="Invalid reservationDate format")
+        
+        if reservation.customerName is None or not reservation.customerName.strip():
+            raise HTTPException(status_code=400, detail="Customer name cannot be empty")
+
+        name = reservation.customerName.strip()
+
+        if name.isdigit():
+            raise HTTPException(status_code=400, detail="Customer name cannot be only numbers")
+
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="Customer name is too short")
+
+        if len(name) > 60:
+            raise HTTPException(status_code=400, detail="Customer name is too long")
 
         # 1) Validación amountOfPeople
         if reservation.amountOfPeople < 1 or reservation.amountOfPeople > 4:
@@ -72,17 +86,29 @@ def make_reservation_controller(reservation: Reservation):
                 detail="Reservation date must be between tomorrow and one month from tomorrow (BA time)",
             )
 
-        # 3) Validación de horario
-        valid_times = ["12:00", "13:00", "21:00", "22:00"]
-
+        
+        # --- 3) Validación de horario ---
         if not reservation.reservationTime:
             raise HTTPException(status_code=400, detail="Reservation time is required")
 
-        if reservation.reservationTime not in valid_times:
+        # Limpieza de espacios
+        time_raw = reservation.reservationTime
+        time_clean = str(time_raw).strip()
+
+        # Normalización: si viene como "21:00:00" → cortar a "21:00"
+        if len(time_clean) >= 5 and time_clean[2] == ":":
+            time_clean = time_clean[:5]
+
+        valid_times = ["12:00", "13:00", "21:00", "22:00"]
+
+        if time_clean not in valid_times:
             raise HTTPException(
                 status_code=400,
                 detail="Reservation time must be one of: 12:00, 13:00, 21:00, 22:00",
             )
+        # Reemplazar el valor limpio en el payload
+        reservation.reservationTime = time_clean
+
 
         # 4) Chequeo de slot usando la fecha BA ya corregida
         slot_check = check_and_update_slot(res_date, reservation.reservationTime)
@@ -111,14 +137,36 @@ def get_available_slots_controller(reservation_date: str):
     Controlador para obtener los horarios disponibles para una fecha dada.
     """
     try:
-        # ¡ACORDATE DE LA VALIDACIÓN QUE AGREGAMOS ACÁ!
+        # 1) Validación de formato básico YYYY-MM-DD
         if len(reservation_date) != 10 or reservation_date[4] != "-" or reservation_date[7] != "-":
             raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD.")
-            
+
+        # 2) Validar que sea una fecha REAL (no 2025-13-40)
+        try:
+            parsed_date = datetime.strptime(reservation_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Fecha inválida. Use una fecha real en formato YYYY-MM-DD.")
+
+        # 3) Validar rango permitido (mañana hasta 1 mes desde mañana)
+        today_ba = now_ba().date()
+        tomorrow_ba = today_ba + timedelta(days=1)
+        one_month_later_ba = tomorrow_ba + timedelta(days=30)
+
+        if parsed_date < tomorrow_ba or parsed_date > one_month_later_ba:
+            raise HTTPException(
+                status_code=400,
+                detail="Date must be between tomorrow and one month ahead."
+            )
+
+        # 4) Obtener slots
         slots = get_available_slots(reservation_date)
         return slots
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
     
 def get_reservations_by_day_controller(reservation_date: str):
     try:

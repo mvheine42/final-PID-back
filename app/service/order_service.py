@@ -2,10 +2,11 @@ from calendar import monthrange
 from typing import Dict, List
 from zoneinfo import ZoneInfo
 from app.db.firebase import db
-from app.service.table_service import get_table_by_id
+from app.service.table_service import get_table_by_id, update_table_status
 from app.models.order_item import OrderItem
 from datetime import datetime
-from app.date_time_utils import now_ba_iso, parse_any_iso_to_ba_naive
+from app.date_time_utils import now_ba, now_ba_iso, parse_any_iso_to_ba_naive
+from app.service.table_service import associate_order_with_table_service
 from fastapi import HTTPException
 from collections import defaultdict
 
@@ -20,7 +21,8 @@ def create_order(order_data):
         orders_ref = db.collection('orders')
         new_order_ref = orders_ref.document(str(next_id))
         new_order_ref.set(order_data)  # Crear la nueva orden en Firebase
-        
+        # necesito que la mesa pase a BUSY y se asocie la orden
+        #associate_order_with_table(order_data.get("tableNumber"), str(next_id))
         return {
             "message": "Order created successfully",
             "order_id": next_id,  # Devuelve el ID de la nueva orden
@@ -78,7 +80,7 @@ def finalize_order(order_id: str):
 
 def get_order_by_id(order_id: str):
     try:
-        order_ref = db.collection('orders').document(order_id)
+        order_ref = db.collection('orders').document(str(order_id))
         order_doc = order_ref.get()
         if not order_doc.exists:
             return None
@@ -217,166 +219,310 @@ def get_orders_by_status(status: str):
         raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
 
 def get_months_revenue_service():
+    """
+    Calculates total revenue per month from all FINALIZED orders.
+    Returns a dictionary with format: {"YYYY-MM": total_revenue}
+    """
     try:
-        #necesito ver todas las ordenes de mi base y armar una lista que asocie mes con el total de plata de cada orden en el mes
-        #en este caso, lo que me interesa es el mes y el total de plata
-        #la lista lo construyo con un diccionario donde la llave es el mes y el valor es el total de plata
-
-        orders = db.collection('orders').stream()
-        months_revenue = {}
-        for order in orders:
-            order_data = order.to_dict()
-            date = order_data.get('date')
-            #necesito mes y año juntos
-            #ejemplo: 2022-01
-            #ejemplo: 2022-02
-            # i need to join month and year together
-            # example: 2022-01
-            # example: 2022-02
-            #
-            month = date.split('-')[1]
-            year = date.split('-')[0]
-            month_year = f"{year}-{month}"
-            total = order_data.get('total')
-            if month_year in months_revenue:
-                months_revenue[month_year] += float(total)  
-            else:
-                months_revenue[month_year] = float(total)
-
-        return months_revenue
+        # Only get FINALIZED orders for accurate revenue reporting
+        finalized_orders = db.collection('orders').where('status', '==', 'FINALIZED').stream()
+        monthly_revenue = {}
+        
+        for order_doc in finalized_orders:
+            order_data = order_doc.to_dict()
+            order_date = order_data.get('date')
+            order_total = order_data.get('total')
+            
+            # Skip orders without date or total
+            if not order_date or not order_total:
+                continue
+            
+            # Extract year and month from date (YYYY-MM-DD)
+            try:
+                date_parts = order_date.split('-')
+                if len(date_parts) >= 2:
+                    year = date_parts[0]
+                    month = date_parts[1]
+                    month_year_key = f"{year}-{month}"
+                    
+                    # Accumulate revenue for this month
+                    revenue_amount = float(order_total)
+                    monthly_revenue[month_year_key] = monthly_revenue.get(month_year_key, 0) + revenue_amount
+            except (ValueError, IndexError) as e:
+                # Skip invalid dates
+                continue
+        
+        return monthly_revenue
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving monthly revenue: {str(e)}")
 
 def get_average_per_person_service(year: str, month: str) -> Dict[str, float]:
+    """
+    Calculates the average spending per person per day for a given month.
+    For each order, divides total by amountOfPeople, then averages across all orders per day.
+    """
     try:
         _, num_days = monthrange(int(year), int(month))
-
-        average_per_person = {f"{year}-{int(month):02d}-{day:02d}": 0 for day in range(1, num_days + 1)}
-
+        
+        # Initialize all days with 0
+        average_per_person = {
+            f"{year}-{int(month):02d}-{day:02d}": 0.0 
+            for day in range(1, num_days + 1)
+        }
+        
+        # Format month with leading zero for query
+        month_padded = f"{int(month):02d}"
+        start_date = f"{year}-{month_padded}-01"
+        end_date = f"{year}-{month_padded}-{num_days:02d}"
+        
         # Query orders within the specified month
         orders = db.collection('orders') \
-                   .where('date', '>=', f"{year}-{month}-01") \
-                   .where('date', '<=', f"{year}-{month}-{num_days}") \
-                   .stream()
-
-        # Dictionary to accumulate the sum of averages per day
-        daily_totals = {f"{year}-{int(month):02d}-{day:02d}": [] for day in range(1, num_days + 1)}
-
-        for order in orders:
-            order_data = order.to_dict()
-            date = order_data.get('date')
-            total = order_data.get('total')
+            .where('date', '>=', start_date) \
+            .where('date', '<=', end_date) \
+            .stream()
+        
+        # Dictionary to accumulate per-person values per day
+        daily_per_person_values = defaultdict(list)
+        
+        for order_doc in orders:
+            order_data = order_doc.to_dict()
+            order_date = order_data.get('date')
+            order_total = order_data.get('total')
             amount_of_people = order_data.get('amountOfPeople')
-
-            # Ensure that total is converted to float
+            
+            # Skip invalid data
+            if not order_date or not order_total or not amount_of_people:
+                continue
+            
+            # Convert and validate
             try:
-                total = float(total)
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid total value: {total}")
-
-            # Ensure amount_of_people is valid
-            if amount_of_people > 0:
-                average = total / amount_of_people
-                if date in daily_totals:
-                    daily_totals[date].append(average)
-
-        # Calculate the sum of averages for each day
-        for day, averages in daily_totals.items():
-            if averages:  # Only sum if there are averages for that day
-                average_per_person[day] = sum(averages)
-
+                total_amount = float(order_total)
+                num_people = int(amount_of_people)
+                
+                # Only process if we have at least 1 person
+                if num_people > 0:
+                    per_person_amount = total_amount / num_people
+                    daily_per_person_values[order_date].append(per_person_amount)
+            except (ValueError, TypeError, ZeroDivisionError):
+                continue
+        
+        # Calculate the average of all per-person amounts for each day
+        for day_key, per_person_amounts in daily_per_person_values.items():
+            if per_person_amounts:
+                # Average all the per-person amounts for this day
+                average_per_person[day_key] = round(
+                    sum(per_person_amounts) / len(per_person_amounts), 
+                    2
+                )
+        
         return average_per_person
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error calculating average per person: {str(e)}"
+        )
 
 def get_average_per_order_service(year: str, month: str) -> Dict[str, float]:
-    # i need to get the average per order so, sum all the orders totals and divide by the amount of orders
+    """
+    Calculates the average order total per day for a given month.
+    Returns daily averages for all orders (not just FINALIZED).
+    """
     try:
         _, num_days = monthrange(int(year), int(month))
-
-        average_per_order = {f"{year}-{int(month):02d}-{day:02d}": 0 for day in range(1, num_days + 1)}
-
+        
+        # Initialize all days with 0
+        average_per_order = {
+            f"{year}-{int(month):02d}-{day:02d}": 0.0 
+            for day in range(1, num_days + 1)
+        }
+        
+        # Format month with leading zero for query
+        month_padded = f"{int(month):02d}"
+        start_date = f"{year}-{month_padded}-01"
+        end_date = f"{year}-{month_padded}-{num_days:02d}"
+        
         # Query orders within the specified month
         orders = db.collection('orders') \
-                   .where('date', '>=', f"{year}-{month}-01") \
-                   .where('date', '<=', f"{year}-{month}-{num_days}") \
-                   .stream()
-
-        # Dictionary to accumulate the sum of averages per day
-        daily_totals = {f"{year}-{int(month):02d}-{day:02d}": [] for day in range(1, num_days + 1)}
-
-        for order in orders:
-            order_data = order.to_dict()
-            date = order_data.get('date')
-            total = order_data.get('total')
-
-            # Ensure that total is converted to float
+            .where('date', '>=', start_date) \
+            .where('date', '<=', end_date) \
+            .stream()
+        
+        # Dictionary to accumulate totals per day
+        daily_totals = defaultdict(list)
+        
+        for order_doc in orders:
+            order_data = order_doc.to_dict()
+            order_date = order_data.get('date')
+            order_total = order_data.get('total')
+            
+            if not order_date or not order_total:
+                continue
+            
+            # Convert total to float
             try:
-                total = float(total)
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid total value: {total}")
-
-            daily_totals[date].append(total)
-
-        # Calculate the sum of averages for each day
-        for day, totals in daily_totals.items():
-            if totals:  # Only sum if there are totals for that day
-                average = sum(totals) / len(totals)
-                average_per_order[day] = average
-
+                total_amount = float(order_total)
+                daily_totals[order_date].append(total_amount)
+            except (ValueError, TypeError):
+                continue
+        
+        # Calculate average for each day that has orders
+        for day_key, totals in daily_totals.items():
+            if totals:
+                average_per_order[day_key] = round(sum(totals) / len(totals), 2)
+        
         return average_per_order
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving orders: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error calculating average per order: {str(e)}")
 
-def assign_order_to_table_service(order_id: str, table_id: int, updated_order: dict):
-
-    order_ref = db.collection("orders").document(str(order_id))
-    table_ref = db.collection("tables").document(str(table_id))
-
+# SERVICE
+def assign_order_to_table_service(order_id: str, table_id: int):
     try:
-        # 1) Actualiza la ORDEN
-        order_ref.update(updated_order)
-
-        try:
-            # 2) Actualiza la MESA
-            table_ref.update({
-                "status": "BUSY",
-                "order_id": int(order_id)
-            })
-
-        except Exception as e:
-            # Rollback
-            order_ref.update({
-                "status": "INACTIVE",
-                "tableNumber": 0
-            })
-            raise HTTPException(status_code=500, detail=f"Failed updating table: {e}")
-
-        return {
-            "message": "Order assigned successfully",
-            "order_id": order_id,
-            "table_id": table_id
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-def assign_employee_to_order(order_id, uid):
-    order_ref = db.collection("orders").document(order_id)
-    #check if order exists
-    order_doc = order_ref.get()
-    if not order_doc.exists:
-        return HTTPException(status_code=404, detail="Order not found")
-    
-    if order_doc.to_dict().get("employee") != "" and order_doc.to_dict().get("status") != "INACTIVE":
-        raise HTTPException(status_code=400, detail="Order already has an assigned employee")
-    try:
+        # Get fresh data
+        order = get_order_by_id(order_id)
+        table = get_table_by_id(str(table_id))
+        
+        # Basic existence checks
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if not table:
+            raise HTTPException(status_code=404, detail="Table not found")
+        
+        # Normalize statuses for comparison
+        order_status = (order.get("status") or "").strip().upper()
+        table_status = (table.get("status") or "").strip().upper()
+        order_table_num = int(order.get("tableNumber") or 0)
+        table_order_id = int(table.get("order_id") or 0)
+        
+        # IDEMPOTENCY CHECK - if already assigned correctly, return success
+        if (order_status == "IN PROGRESS" 
+            and order_table_num == int(table_id)
+            and table_status == "BUSY"
+            and table_order_id == int(order_id)):
+            return {"message": "Order assigned to table successfully"}
+        
+        # Business validations
+        if not order.get("orderItems"):
+            raise HTTPException(status_code=400, detail="ORDER HAS NO ITEMS")
+        
+        if order_status != "INACTIVE":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Order status must be INACTIVE, current status: {order_status}"
+            )
+        
+        if order_table_num != 0:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Order is already assigned to table {order_table_num}"
+            )
+        
+        # REMOVED: Employee check - orders can have employees assigned before table assignment
+        # This allows the workflow: Employee -> assigns themselves -> then assigns to table
+        
+        if table_status != "FREE":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Table status must be FREE, current status: {table_status}"
+            )
+        
+        # Prepare timestamp and items
+        ts = now_ba_iso()
+        items = order.get("orderItems", [])
+        for item in items:
+            item["created_at"] = ts
+            item["served_at"] = None
+        
+        # Get references
+        order_ref = db.collection('orders').document(order_id)
+        table_ref = db.collection('tables').document(str(table_id))
+        
+        # Update order first
         order_ref.update({
-            "employee": uid  # Assuming you store employee's UID in the 'employee' field
+            "status": "IN PROGRESS",
+            "tableNumber": int(table_id),
+            "orderItems": items
         })
-        return {"message": "Employee assigned successfully"}
+        
+        try:
+            # Update table second
+            table_ref.update({
+                "order_id": int(order_id),
+                "status": "BUSY"
+            })
+        except Exception as table_error:
+            # Rollback order if table update fails
+            try:
+                order_ref.update({
+                    "status": "INACTIVE",
+                    "tableNumber": 0
+                })
+            except Exception as rollback_error:
+                print(f"CRITICAL: Rollback failed: {rollback_error}")
+            
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed updating table: {str(table_error)}"
+            )
+        
+        return {"message": "Order assigned to table successfully"}
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+def assign_employee_to_order_service(order_id: str, uid: str):
+    try:
+        # Get order reference and document
+        order_ref = db.collection("orders").document(order_id)
+        order_doc = order_ref.get()
+        
+        # Check if order exists
+        if not order_doc.exists:
+            raise HTTPException(status_code=404, detail="Order not found")
+        
+        order_data = order_doc.to_dict()
+        
+        # Normalize values
+        order_status = (order_data.get("status") or "").strip().upper()
+        current_employee = order_data.get("employee")
+        
+        # IDEMPOTENCY: If this employee is already assigned, return success
+        if current_employee == uid:
+            return {"message": "Employee assigned successfully"}
+        
+        # Check if order already has a different employee assigned
+        if current_employee and str(current_employee).strip():
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Order already has an assigned employee: {current_employee}"
+            )
+        
+        # Check if order status is INACTIVE (only INACTIVE orders can be assigned)
+        if order_status != "INACTIVE":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Can only assign employees to INACTIVE orders. Current status: {order_status}"
+            )
+        
+        # Assign employee
+        order_ref.update({
+            "employee": uid
+        })
+        
+        return {"message": "Employee assigned successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error assigning employee: {str(e)}"
+        )
+
 
 def serve_order_item_service(order_id: str, item_id: str):
     try:
@@ -389,27 +535,55 @@ def serve_order_item_service(order_id: str, item_id: str):
         order_data = order_doc.to_dict()
         items = order_data.get("orderItems", [])
         item_found = False
-        
+
+        # --- Obtener hora BA actual coherente con created_at ---
+        now_iso = now_ba_iso()                                      # ISO BA
+        now_dt = parse_any_iso_to_ba_naive(now_iso)                # NAIVE BA
+
         for item in items:
             if item.get("item_id") == item_id:
+
+                # Idempotente
                 if item.get("served_at"):
                     return {"message": "Item already served"}
-                item["served_at"] = now_ba_iso()
+
+                # created_at obligatorio
+                created_str = item.get("created_at")
+                if not created_str:
+                    raise HTTPException(500, "Item has no created_at timestamp")
+
+                try:
+                    created_dt = parse_any_iso_to_ba_naive(created_str)
+                except Exception:
+                    raise HTTPException(500, "Invalid created_at timestamp format")
+
+                # Validación tiempo BA
+                if now_dt < created_dt:
+                    raise HTTPException(
+                        400,
+                        "Serve time cannot be earlier than created_at"
+                    )
+
+                # Guardar serve_at
+                item["served_at"] = now_iso
                 item_found = True
                 break
-        
+
         if not item_found:
-            raise HTTPException(status_code=404, detail="Item not found in this order")
+            raise HTTPException(404, "Item not found in this order")
         
+        # Persistir update
         order_ref.update({"orderItems": items})
         
         return {"message": "Item served successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+
     
 # ... (El resto del archivo queda igual) ...
 
