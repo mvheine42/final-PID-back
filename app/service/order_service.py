@@ -657,3 +657,89 @@ def get_wait_time_by_day_service():
         return averages
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================
+# SERVICES CON FILTRO (mes/año específico)
+# ============================================
+
+def get_wait_time_by_product_filtered_service(month: str, year: str):
+    try:
+        orders_ref = db.collection('orders').stream()
+        product_waits = defaultdict(list)
+        
+        for order_doc in orders_ref:
+            order = order_doc.to_dict()
+            items = order.get("orderItems", [])
+            
+            for item in items:
+                start_str = item.get("created_at")
+                end_str = item.get("served_at")
+                prod_name = item.get("product_name")
+                
+                if start_str and end_str and prod_name:
+                    try:
+                        start_dt = parse_any_iso_to_ba_naive(start_str)
+                        end_dt = parse_any_iso_to_ba_naive(end_str)
+                    except ValueError:
+                        continue
+                    
+                    # FILTRO POR MES/AÑO
+                    if start_dt.month != int(month) or start_dt.year != int(year):
+                        continue
+                    
+                    wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                    if wait_minutes >= 0:
+                        product_waits[prod_name].append(wait_minutes)
+        
+        averages = {
+            name: round(sum(times) / len(times), 2)
+            for name, times in product_waits.items()
+        }
+        return averages
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_wait_time_by_day_filtered_service(month: str, year: str):
+    try:
+        orders_ref = db.collection('orders').stream()
+        daily_waits = defaultdict(list)
+        
+        for order_doc in orders_ref:
+            order = order_doc.to_dict()
+            order_date = order.get("date")
+            items = order.get("orderItems", [])
+            
+            if not order_date:
+                continue
+            
+            for item in items:
+                start_str = item.get("created_at")
+                end_str = item.get("served_at")
+                
+                if not (start_str and end_str):
+                    continue
+                
+                try:
+                    start_dt = parse_any_iso_to_ba_naive(start_str)
+                    end_dt = parse_any_iso_to_ba_naive(end_str)
+                except ValueError:
+                    continue
+                
+                # FILTRO POR MES/AÑO
+                if start_dt.month != int(month) or start_dt.year != int(year):
+                    continue
+                
+                wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                if wait_minutes >= 0:
+                    daily_waits[order_date].append(wait_minutes)
+        
+        averages = {}
+        for day in sorted(daily_waits.keys()):
+            times = daily_waits[day]
+            averages[day] = round(sum(times) / len(times), 2)
+        
+        return averages
+    except Exception as e:
+        return {"error": str(e)}

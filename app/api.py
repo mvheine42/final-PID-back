@@ -61,6 +61,8 @@ from app.controller.order_controller import (
     get_average_per_order_controller,
     get_average_per_person_controller,
     get_months_revenue,
+    get_wait_time_by_day_filtered_controller,
+    get_wait_time_by_product_filtered_controller,
     register_new_order,
     finalize_order_controller,
     get_orders,
@@ -478,13 +480,22 @@ async def serve_item(order_id: str, item_id: str, user=Depends(verify_token_head
     return serve_order_item_controller(order_id, item_id)
 
 
-# Tiempo de espera por producto (PROTEGIDO)
+# Tiempo de espera por producto (PROTEGIDO) - SIN FILTRO
 @router.get("/reports/wait-time/products")
 async def wait_time_by_product(user=Depends(verify_token_header)):
     return get_wait_time_by_product_controller()
 
+# Tiempo de espera por producto filtrado por mes/año (PROTEGIDO) - CON FILTRO
+@router.get("/reports/wait-time-products-monthly/{month}/{year}")
+async def wait_time_by_product_filtered(month: str, year: str, user=Depends(verify_token_header)):
+    return get_wait_time_by_product_filtered_controller(month, year)
 
-# Tiempo de espera diario (PROTEGIDO)
+# Tiempo de espera diario (PROTEGIDO) - SIN FILTRO
 @router.get("/reports/wait-time/daily")
 async def wait_time_by_day(user=Depends(verify_token_header)):
     return get_wait_time_by_day_controller()
+
+# Tiempo de espera diario filtrado por mes/año (PROTEGIDO) - CON FILTRO
+@router.get("/reports/wait-time-monthly/{month}/{year}")
+async def wait_time_by_day_filtered(month: str, year: str, user=Depends(verify_token_header)):
+    return get_wait_time_by_day_filtered_controller(month, year)

@@ -19,6 +19,8 @@ from app.service.order_service import (
     add_items_to_order,
     get_average_per_person_service,
     get_average_per_order_service,
+    get_wait_time_by_day_filtered_service,
+    get_wait_time_by_product_filtered_service,
     serve_order_item_service,
     get_wait_time_by_product_service,
     get_wait_time_by_day_service,
@@ -368,16 +370,30 @@ def serve_order_item_controller(order_id: str, item_id: str):
 
 
 
+# Controllers SIN filtro
 def get_wait_time_by_product_controller():
     try:
         return get_wait_time_by_product_service()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 def get_wait_time_by_day_controller():
     try:
         return get_wait_time_by_day_service()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Controllers CON filtro de mes/año
+def get_wait_time_by_product_filtered_controller(month: str, year: str):
+    try:
+        return get_wait_time_by_product_filtered_service(month, year)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_wait_time_by_day_filtered_controller(month: str, year: str):
+    try:
+        return get_wait_time_by_day_filtered_service(month, year)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
