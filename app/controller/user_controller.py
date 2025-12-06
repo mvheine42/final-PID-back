@@ -5,26 +5,20 @@ from fastapi import HTTPException
 
 def login(user: UserLogin):
     try:
-        # Verificar las credenciales del usuario
-        user = auth.get_user_by_email(user.email)
-        return {"message": "Usuario autenticado exitosamente", "user_id": user.uid}
-    except firebase_admin.auth.AuthError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        u = auth.get_user_by_email(user.email)
+        return {"message": "Usuario autenticado exitosamente", "user_id": u.uid}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 def token(token_data: TokenData):
     try:
-        # Verificar el token enviado por el cliente
         decoded_token = auth.verify_id_token(token_data.id_token)
-        uid = decoded_token['uid']
+        uid = decoded_token.get("uid") or decoded_token.get("sub")
         if not uid:
-            raise HTTPException(status_code=400, detail="Token inválido")
+            raise HTTPException(status_code=400, detail="Token inválido: uid ausente")
         return {"message": "Token verificado", "user_id": uid}
-    except firebase_admin.auth.AuthError as e:
-        raise HTTPException(status_code=400, detail="Token no válido o expirado")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Token no válido o expirado")
 
 # Controlador para registrar un nuevo usuario
 def register(user: UserRegister, auth_user):

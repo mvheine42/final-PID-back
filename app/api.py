@@ -103,7 +103,7 @@ async def login_user(user: UserLogin):
 
 # Verificar token (PROTEGIDO por Bearer)
 @router.post("/verify-token/")
-async def verify_token_endpoint(token_data: TokenData, user=Depends(verify_token_header)):
+async def verify_token_endpoint(token_data: TokenData):
     return token(token_data)
 
 
