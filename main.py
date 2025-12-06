@@ -24,6 +24,7 @@ ALLOWED_ORIGINS = [
     "https://2024-ranchoaparte-front-ivory.vercel.app",
     "http://2024-huidobro-front.vercel.app",
     "https://2024-huidobro-front-ey08brtzo-josehuidobro1s-projects.vercel.app",
+    "https://final-pid-front-heine.vercel.app"
 ]
 
 # Regex para Vercel extra si alguna vez lo necesitás
