@@ -668,6 +668,10 @@ def get_wait_time_by_product_filtered_service(month: str, year: str):
         orders_ref = db.collection('orders').stream()
         product_waits = defaultdict(list)
         
+        # Convertir "null" string a None para filtrado opcional
+        filter_month = None if month == 'null' else int(month)
+        filter_year = None if year == 'null' else int(year)
+        
         for order_doc in orders_ref:
             order = order_doc.to_dict()
             items = order.get("orderItems", [])
@@ -684,8 +688,12 @@ def get_wait_time_by_product_filtered_service(month: str, year: str):
                     except ValueError:
                         continue
                     
-                    # FILTRO POR MES/AÑO
-                    if start_dt.month != int(month) or start_dt.year != int(year):
+                    # FILTRO POR MES (si está definido)
+                    if filter_month is not None and start_dt.month != filter_month:
+                        continue
+                    
+                    # FILTRO POR AÑO (si está definido)
+                    if filter_year is not None and start_dt.year != filter_year:
                         continue
                     
                     wait_minutes = (end_dt - start_dt).total_seconds() / 60
@@ -702,6 +710,55 @@ def get_wait_time_by_product_filtered_service(month: str, year: str):
 
 
 def get_wait_time_by_day_filtered_service(month: str, year: str):
+    try:
+        orders_ref = db.collection('orders').stream()
+        daily_waits = defaultdict(list)
+        
+        # Convertir "null" string a None para filtrado opcional
+        filter_month = None if month == 'null' else int(month)
+        filter_year = None if year == 'null' else int(year)
+        
+        for order_doc in orders_ref:
+            order = order_doc.to_dict()
+            order_date = order.get("date")
+            items = order.get("orderItems", [])
+            
+            if not order_date:
+                continue
+            
+            for item in items:
+                start_str = item.get("created_at")
+                end_str = item.get("served_at")
+                
+                if not (start_str and end_str):
+                    continue
+                
+                try:
+                    start_dt = parse_any_iso_to_ba_naive(start_str)
+                    end_dt = parse_any_iso_to_ba_naive(end_str)
+                except ValueError:
+                    continue
+                
+                # FILTRO POR MES (si está definido)
+                if filter_month is not None and start_dt.month != filter_month:
+                    continue
+                
+                # FILTRO POR AÑO (si está definido)
+                if filter_year is not None and start_dt.year != filter_year:
+                    continue
+                
+                wait_minutes = (end_dt - start_dt).total_seconds() / 60
+                if wait_minutes >= 0:
+                    daily_waits[order_date].append(wait_minutes)
+        
+        averages = {}
+        for day in sorted(daily_waits.keys()):
+            times = daily_waits[day]
+            averages[day] = round(sum(times) / len(times), 2)
+        
+        return averages
+    except Exception as e:
+        return {"error": str(e)}
     try:
         orders_ref = db.collection('orders').stream()
         daily_waits = defaultdict(list)
