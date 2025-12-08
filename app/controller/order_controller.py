@@ -229,10 +229,19 @@ def register_new_order(order: Order, user):
         item["created_at"] = ba_now_iso
         item["served_at"] = None
 
+    if not is_external:
+        uid = order.employee
+        emp = get_user_by_id(uid, user)
+        if emp:
+            data["employee_name"] = emp.get("name", "")
+        else:
+            data["employee_name"] = ""
+
     # EXTERNAL ajustes
     if order_type == "EXTERNAL":
         data["tableNumber"] = 0
         data["employee"] = ""
+        data["employee_name"] = ""
 
     # Guardar
     resp = create_order(data)

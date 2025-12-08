@@ -7,11 +7,10 @@ from app.models.category import Category
 from app.models.order import Order
 from app.models.goal import Goal
 from app.models.reservation import Reservation
-from app.models.order_item import OrderItem
-from app.models.table import Table
 
 from app.controller.user_controller import (
     check_level_controller,
+    check_level_user_controller,
     get_top_level_status_controller,
     level_controller,
     login,
@@ -52,7 +51,6 @@ from app.controller.table_controller import (
     close_table_controller,
     get_table_by_id_controller,
     get_tables_controller,
-    update_table_status_controller,
 )
 from app.controller.order_controller import (
     assign_employee_to_order_controller,
@@ -397,6 +395,10 @@ async def level(level_id: str, user=Depends(verify_token_header)):
 @router.get("/check-level/")
 async def check_level(user=Depends(verify_token_header)):
     return check_level_controller(user)
+
+@router.get("/check-level-user/{uid}")
+async def check_level_user(uid: str, user=Depends(verify_token_header)):
+    return check_level_user_controller(uid)
 
 
 # Top level status (PROTEGIDO)

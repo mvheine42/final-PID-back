@@ -20,9 +20,8 @@ def token(token_data: TokenData):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Token no válido o expirado")
 
-# Controlador para registrar un nuevo usuario
 def register(user: UserRegister, auth_user):
-    print(f"Starting registration for user: {user.uid}")  # Debug
+    print(f"Starting registration for user: {user.uid}")
     
     token = auth_user.get("uid") or auth_user.get("sub") or auth_user.get("user_id")
     if not token:
@@ -30,19 +29,15 @@ def register(user: UserRegister, auth_user):
     
     if user.uid != token:
         raise HTTPException(status_code=403, detail="User ID does not match token")
-    
-    # Get email from Firebase Auth using the uid
     try:
         firebase_user = auth.get_user(user.uid)
         user_email = firebase_user.email
-        print(f"Firebase user found: {user_email}")  # Debug
+        print(f"Firebase user found: {user_email}")
     except Exception as e:
-        print(f"Error getting Firebase user: {str(e)}")  # Debug
+        print(f"Error getting Firebase user: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Could not retrieve user from Firebase Auth: {str(e)}")
-    
-    # Verify if user already exists in Firestore
+
     db_user = user_by_id(user.uid)
-    print(f"DB user check result: {db_user}")  # Debug
     
     if db_user and "error" not in db_user:
         raise HTTPException(status_code=400, detail="User already registered")
@@ -50,16 +45,15 @@ def register(user: UserRegister, auth_user):
     if db_user and "error" in db_user:
         raise HTTPException(status_code=500, detail=db_user["error"])
     
-    # Create user in Firestore
     response = create_user(user)
-    print(f"Create user response: {response}")  # Debug
+    print(f"Create user response: {response}") 
     
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
     
     return {"message": "User registered successfully"}
 
-# Controlador para recuperación de contraseña
+
 def handle_forgot_password(user: UserForgotPassword):
     response = forgot_password(user.email)
     
@@ -90,11 +84,24 @@ def delete_user_by_id(uid: str, user):
         token = (user.get("uid") or user.get("sub") or user.get("user_id") or "").strip()
         if not token or uid != token:
             raise HTTPException(status_code=403, detail="Forbidden: Cannot access other user's data")
+        
         response = delete_user(uid)
-        if "error" in response:            
+        
+        if "error" in response:
+            # Manejo específico de error de órdenes activas
+            if response["error"] == "ACTIVE_ORDERS":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"You have {response['count']} active order(s) in progress. Please complete or reassign them before deleting your account."
+                )
+            # Otros errores
             raise HTTPException(status_code=500, detail=response["error"])
+        
         return response
-    except Exception as e:    
+        
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 def ranking_controller():
@@ -137,6 +144,23 @@ def check_level_controller(user):
         raise  # Re-raise HTTP exceptions
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+def check_level_user_controller(uid: str):
+    try:
+        if not uid:
+            raise HTTPException(400, "No UID provided")
+
+        response = check_level_service(uid)
+
+        if isinstance(response, dict) and "error" in response:
+            raise HTTPException(404, response["error"])
+
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 
 def get_top_level_status_controller(level_id: str):
     try:

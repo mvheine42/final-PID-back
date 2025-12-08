@@ -1,3 +1,4 @@
+from http.client import HTTPException
 from app.db.firebase import db
 import firebase_admin
 from firebase_admin import auth 
@@ -77,10 +78,24 @@ def user_by_id(uid):
 
 def delete_user(uid):
     try:
+        # Verificar órdenes activas
+        orders_ref = db.collection("orders")
+        active_orders = list(
+            orders_ref.where("employee", "==", uid)
+                     .where("status", "==", "IN PROGRESS")
+                     .stream()
+        )
+        
+        if len(active_orders) > 0:
+            return {"error": "ACTIVE_ORDERS", "count": len(active_orders)}
+        
+        # Eliminar usuario
         auth.delete_user(uid)
         user_ref = db.collection('users').document(uid)
         user_ref.delete()
+        
         return {"message": "User deleted successfully"}
+        
     except Exception as e:
         return {"error": str(e)}
 
@@ -184,6 +199,7 @@ def check_level_service(uid):
         raise  # Re-raise HTTP exceptions
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
 
 def get_top_level_status(level_id):
     try:

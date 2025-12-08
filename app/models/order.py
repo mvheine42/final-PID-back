@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from app.models.order_item import OrderItem
 from pydantic import BaseModel, Field
 
@@ -12,3 +12,4 @@ class Order(BaseModel):
     total: str
     orderItems: List[OrderItem]
     employee: str
+    employee_name: Optional[str] = None

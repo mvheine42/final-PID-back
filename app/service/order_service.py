@@ -12,6 +12,8 @@ from collections import defaultdict
 
 from datetime import datetime, timedelta
 
+from app.service.user_service import user_by_id
+
 
 def create_order(order_data):
     try:
@@ -508,9 +510,14 @@ def assign_employee_to_order_service(order_id: str, uid: str):
                 detail=f"Can only assign employees to INACTIVE orders. Current status: {order_status}"
             )
         
+        user_data = user_by_id(uid)
+        if not user_data or "error" in user_data:
+            raise HTTPException(status_code=500, detail="Error fetching employee data")
+        
         # Assign employee
         order_ref.update({
-            "employee": uid
+            "employee": uid,
+            "employee_name": user_data.get("name")
         })
         
         return {"message": "Employee assigned successfully"}
