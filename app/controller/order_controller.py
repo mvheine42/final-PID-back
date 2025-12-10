@@ -256,7 +256,6 @@ def register_new_order(order: Order, user):
 def finalize_order_controller(order_id: str):
     try:
         order = get_order_by_id(order_id)
-        print(order)
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
         

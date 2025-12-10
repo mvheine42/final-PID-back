@@ -21,7 +21,6 @@ def token(token_data: TokenData):
         raise HTTPException(status_code=400, detail="Token no válido o expirado")
 
 def register(user: UserRegister, auth_user):
-    print(f"Starting registration for user: {user.uid}")
     
     token = auth_user.get("uid") or auth_user.get("sub") or auth_user.get("user_id")
     if not token:
@@ -32,9 +31,7 @@ def register(user: UserRegister, auth_user):
     try:
         firebase_user = auth.get_user(user.uid)
         user_email = firebase_user.email
-        print(f"Firebase user found: {user_email}")
     except Exception as e:
-        print(f"Error getting Firebase user: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Could not retrieve user from Firebase Auth: {str(e)}")
 
     db_user = user_by_id(user.uid)
@@ -46,7 +43,6 @@ def register(user: UserRegister, auth_user):
         raise HTTPException(status_code=500, detail=db_user["error"])
     
     response = create_user(user)
-    print(f"Create user response: {response}") 
     
     if "error" in response:
         raise HTTPException(status_code=500, detail=response["error"])
