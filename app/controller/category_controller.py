@@ -12,9 +12,6 @@ from app.service.product_service import product_by_id
 from app.service.order_service import get_orders_by_status
 
 
-# -------------------------------------------------------
-#  REGISTER CATEGORY
-# -------------------------------------------------------
 def register_new_category(category: Category):
     """
     Valida y registra una nueva categoría.
@@ -24,7 +21,6 @@ def register_new_category(category: Category):
     - no se permite crear categorías 'Default'
     """
 
-    # --- NAME ---
     if category.name is None or not str(category.name).strip():
         raise HTTPException(status_code=400, detail="Category name cannot be empty")
 
@@ -34,24 +30,19 @@ def register_new_category(category: Category):
         raise HTTPException(status_code=400, detail="Category name cannot be only numbers")
 
 
-    # --- NAME UNIQUE ---
     try:
         exists = check_category_name_exists(name)
     except Exception as e:
-        # si Firebase falló al chequear el nombre
         raise HTTPException(status_code=500, detail=str(e))
 
     if exists:
         raise HTTPException(status_code=400, detail="Category name already exists")
 
-    # --- TYPE ---
-    # Lo que llegue en category.type lo usamos solo para bloquear 'Default'
     incoming_type = str(category.type or "").strip()
 
     if incoming_type.lower() == "default":
         raise HTTPException(status_code=400, detail="Cannot create a category with type 'Default'")
 
-    # Regla de negocio: TODAS las creadas son 'Custom'
     final_type = "Custom"
 
     payload = {
@@ -59,7 +50,6 @@ def register_new_category(category: Category):
         "type": final_type,
     }
 
-    # --- CREATE ---
     try:
         response = create_category(payload)
     except Exception as e:
@@ -70,10 +60,6 @@ def register_new_category(category: Category):
 
     return {"message": "Category registered successfully", "id": response["id"]}
 
-
-# -------------------------------------------------------
-#  GET ALL
-# -------------------------------------------------------
 def get_all_categories():
     response = get_categories()
 
@@ -83,9 +69,6 @@ def get_all_categories():
     return response
 
 
-# -------------------------------------------------------
-#  GET BY ID
-# -------------------------------------------------------
 def get_category_by_id_controller(category_id: str):
 
     if not category_id.isdigit():
@@ -99,12 +82,8 @@ def get_category_by_id_controller(category_id: str):
     return category
 
 
-# -------------------------------------------------------
-#  DELETE CATEGORY
-# -------------------------------------------------------
 def delete_category_controller(category_id: str):
 
-    # --- ID must be numeric ---
     if not category_id.isdigit():
         raise HTTPException(status_code=400, detail="Category ID must be numeric")
 
@@ -116,37 +95,27 @@ def delete_category_controller(category_id: str):
         if msg == "Category not found":
             raise HTTPException(status_code=404, detail=msg)
 
-        # Includes:
-        # - Cannot delete default
-        # - Category used by products
         raise HTTPException(status_code=400, detail=msg)
 
     return response
 
 
-# -------------------------------------------------------
-#  UPDATE NAME
-# -------------------------------------------------------
 def update_category_name_controller(category_id: str, new_name: str):
 
-    # --- ID debe ser numérico ---
     if not category_id.isdigit():
         raise HTTPException(status_code=400, detail="Category ID must be numeric")
 
-    # --- VALIDAR NOMBRE ---
     if new_name is None or not str(new_name).strip():
         raise HTTPException(status_code=400, detail="Category name cannot be empty")
 
     new_name_clean = new_name.strip()
 
-    # No permitir solo números
     if new_name_clean.isdigit():
         raise HTTPException(status_code=400, detail="Category name cannot be only numbers")
 
     if check_category_name_exists(new_name_clean):
         raise HTTPException(status_code=400, detail="Category name already exists")
 
-    # --- EJECUTAR UPDATE ---
     response = update_category_name(category_id, new_name_clean)
 
     if "error" in response:

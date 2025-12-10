@@ -12,9 +12,6 @@ from app.api import router
 
 app = FastAPI()
 
-# ============================
-# CORS CONFIG
-# ============================
 
 ALLOWED_ORIGINS = [
     "http://localhost:4201",
@@ -44,9 +41,6 @@ app.add_middleware(
     expose_headers=EXPOSE_HEADERS,
 )
 
-# ============================
-# CORS EN ERRORES TAMBIÉN
-# ============================
 DEV_DEBUG = True
 _origin_regex = re.compile(ALLOWED_ORIGIN_REGEX)
 
@@ -69,9 +63,6 @@ async def ensure_cors_on_errors(request, call_next):
 
     return response
 
-# ============================
-# OPENAPI – AGREGAR BEARER A LA DOC
-# ============================
 
 def custom_openapi():
     if app.openapi_schema:
@@ -97,8 +88,5 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# ============================
-# ROUTER
-# ============================
 
 app.include_router(router)

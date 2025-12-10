@@ -130,14 +130,13 @@ def check_level_controller(user):
         
         response = check_level_service(token)
         
-        # Check if the response contains an error
         if isinstance(response, dict) and "error" in response:
             raise HTTPException(status_code=404, detail=response["error"])
         
         return response
         
     except HTTPException:
-        raise  # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     

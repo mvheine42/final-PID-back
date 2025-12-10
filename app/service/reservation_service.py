@@ -1,5 +1,5 @@
 from app.db.firebase import db
-from google.cloud import firestore # <-- ¡IMPORTANTE! Para el Increment
+from google.cloud import firestore
 
 def get_next_id_from_existing():
     """
@@ -37,10 +37,6 @@ def check_and_update_slot(reservation_date, reservation_time):
     Verifica y actualiza el cupo disponible para una fecha y hora determinada.
     Devuelve un dict con 'success' o 'error'.
     """
-    #
-    # --- ACORDATE: Esta función sigue teniendo el "race condition" ---
-    # --- ¡Para la v2.0 acordate de ponerle la Transacción! ---
-    #
     try:
         slot_id = f"{reservation_date.isoformat()}_{reservation_time}"
         slot_ref = db.collection("reservation_slots").document(slot_id)
@@ -49,7 +45,7 @@ def check_and_update_slot(reservation_date, reservation_time):
         if slot_doc.exists:
             slot_data = slot_doc.to_dict()
             used = slot_data.get("used", 0)
-            capacity = slot_data.get("capacity", 5)
+            capacity = slot_data.get("capacity", 4)
 
             if used >= capacity:
                 return {"error": "Horario completo"}
@@ -58,7 +54,7 @@ def check_and_update_slot(reservation_date, reservation_time):
             slot_ref.set({
                 "date": reservation_date.isoformat(),
                 "time": reservation_time,
-                "capacity": 5,
+                "capacity": 4,
                 "used": 1
             })
 
@@ -71,7 +67,7 @@ def get_available_slots(reservation_date):
     Obtiene los horarios disponibles para una fecha dada.
     """
     try:
-        allowed_times = ["12:00", "13:00", "21:00", "22:00"]
+        allowed_times = ["12:00", "18:00", "20:00", "22:00"]
         results = []
         for t in allowed_times:
             slot_id = f"{reservation_date}_{t}"
@@ -110,9 +106,6 @@ def get_reservations_by_day(reservation_date: str):
     except Exception as e:
         return {"error": f"Error al obtener reservas para {reservation_date}: {str(e)}"}
 
-# ---
-# --- ¡NUEVA FUNCIÓN DE CANCELACIÓN! ---
-# ---
 def cancel_reservation_service(reservation_id: int):
     """
     Libera todos los recursos de una reserva (mesa y cupo) y la borra.
@@ -126,21 +119,18 @@ def cancel_reservation_service(reservation_id: int):
         
         reservation = res_doc.to_dict()
 
-        # --- 1. Liberar la Mesa (si estaba asignada) ---
         table_id = reservation.get("table_id")
         if table_id not in (None, "", 0):
             table_ref = db.collection("tables").document(str(table_id))
             table_doc = table_ref.get()
             if table_doc.exists:
                 table_data = table_doc.to_dict()
-                # Solo la liberamos si la mesa sigue reservada para ESTA reserva
                 if table_data.get("current_reservation_id") == reservation_id:
                     table_ref.update({
                         "status": "FREE",
                         "current_reservation_id": 0
                     })
 
-        # --- 2. Devolver el Cupo al Slot ---
         res_date = reservation.get("reservationDate")
         res_time = reservation.get("reservationTime")
         
@@ -150,12 +140,9 @@ def cancel_reservation_service(reservation_id: int):
             slot_doc = slot_ref.get()
             
             if slot_doc.exists and slot_doc.to_dict().get("used", 0) > 0:
-                # Usamos Increment para restar 1 de forma segura
                 slot_ref.update({
                     "used": firestore.Increment(-1)
                 })
-
-        # --- 3. Borrar la Reserva ---
         res_ref.delete()
 
         return {"message": f"Reservation {reservation_id} cancelled successfully."}

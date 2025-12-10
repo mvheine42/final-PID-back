@@ -5,13 +5,9 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 def init_firebase():
-    # Si ya se inicializó, devolvemos el cliente Firestore
     if firebase_admin._apps:
         return firestore.client()
 
-    # ============================
-    # MÉTODO A: JSON COMPLETO (Render)
-    # ============================
     json_env = os.getenv("FIREBASE_CREDENTIALS_JSON")
     if json_env:
         try:
@@ -22,9 +18,6 @@ def init_firebase():
         except Exception as e:
             raise RuntimeError(f"FIREBASE_CREDENTIALS_JSON inválida: {e}")
 
-    # ============================
-    # MÉTODO B: Archivo físico (Local)
-    # ============================
     cred_path = os.getenv("FIREBASE_CRED_PATH")
     if cred_path:
         try:
@@ -41,9 +34,6 @@ def init_firebase():
         except Exception as e:
             raise RuntimeError(f"Error con FIREBASE_CRED_PATH: {e}")
 
-    # ============================
-    # SI NO HAY NINGUNA DE LAS DOS
-    # ============================
     raise RuntimeError(
         "No hay credenciales Firebase. Definí FIREBASE_CREDENTIALS_JSON (Render) o FIREBASE_CRED_PATH (Local)."
     )

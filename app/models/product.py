@@ -1,10 +1,9 @@
 from typing import Any
 from pydantic import BaseModel, Field
 
-# Modelo para registrar un nuevo producto
 class Product(BaseModel):
     name: str
-    price: str  # Ensure product_price is non-negative
+    price: str 
     description: str
     category: str
     calories: str | float | int

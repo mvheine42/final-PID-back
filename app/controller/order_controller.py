@@ -31,12 +31,9 @@ from app.service.table_service import get_table_by_id
 from app.service.reservation_service import get_reservation_by_id
 from app.date_time_utils import now_ba_iso, today_ba_str, time_ba_str
 
-
-# --- ZONA HORARIA ---
 BA_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 
 
-# --- VALIDACIONES AUXILIARES ---
 def _parse_float(value: str, field_name: str) -> float:
     try:
         return float(value)
@@ -59,9 +56,6 @@ def _make_local_datetime(date_str: str, time_str: str):
     return BA_TZ.localize(dt)
 
 
-# ---------------------------------------------------------------
-#                   C R E A T E   O R D E R
-# ---------------------------------------------------------------
 def register_new_order(order: Order, user):
     """
     Crea una orden validando:
@@ -81,7 +75,6 @@ def register_new_order(order: Order, user):
         raise HTTPException(status_code=400,
             detail="status must be 'INACTIVE' or 'IN PROGRESS' on creation")
 
-    # Validaciones básicas
     if order.amountOfPeople < 1:
         raise HTTPException(status_code=400,
             detail="amountOfPeople must be >= 1")
@@ -90,16 +83,12 @@ def register_new_order(order: Order, user):
         raise HTTPException(status_code=400,
             detail="tableNumber must be >= 0")
 
-    # Tipo de orden
     is_external = status == "INACTIVE"
 
     order_type = None
     table_data = None
     reservation_data = None
 
-    # ---------------------------------------
-    #        EXTERNAL ORDER
-    # ---------------------------------------
     if is_external:
 
         if order.tableNumber != 0:
@@ -120,9 +109,6 @@ def register_new_order(order: Order, user):
 
         order_type = "EXTERNAL"
 
-    # ---------------------------------------
-    #        INTERNAL ORDER
-    # ---------------------------------------
     else:
         if order.tableNumber <= 0:
             raise HTTPException(status_code=400,
@@ -181,9 +167,6 @@ def register_new_order(order: Order, user):
             raise HTTPException(status_code=400,
                 detail=f"Table status '{table_status}' is not valid for new orders")
 
-    # -----------------------------------------------------
-    #    VALIDACIÓN DE PRODUCTOS & TOTAL DECLARADO
-    # -----------------------------------------------------
     computed_total = 0.0
     if order.orderItems:
         for raw_item in order.orderItems:
@@ -210,13 +193,10 @@ def register_new_order(order: Order, user):
             raise HTTPException(status_code=400,
                 detail="total does not match orderItems sum")
 
-    # -----------------------------------------------------
-    #     ARMAR PAYLOAD FINAL SIEMPRE EN BA
-    # -----------------------------------------------------
 
-    ba_now_iso = now_ba_iso()          # ISO con -03:00
-    ba_date = today_ba_str()           # YYYY-MM-DD
-    ba_time = time_ba_str()            # HH:MM
+    ba_now_iso = now_ba_iso()          
+    ba_date = today_ba_str()           
+    ba_time = time_ba_str()            
 
     data = order.dict()
 
@@ -224,7 +204,6 @@ def register_new_order(order: Order, user):
     data["time"] = ba_time
     data["created_at"] = ba_now_iso
 
-    # Timestamps de items
     for item in data.get("orderItems", []):
         item["created_at"] = ba_now_iso
         item["served_at"] = None
@@ -237,29 +216,24 @@ def register_new_order(order: Order, user):
         else:
             data["employee_name"] = ""
 
-    # EXTERNAL ajustes
     if order_type == "EXTERNAL":
         data["tableNumber"] = 0
         data["employee"] = ""
         data["employee_name"] = ""
 
-    # Guardar
     resp = create_order(data)
     if isinstance(resp, dict) and "error" in resp:
         raise HTTPException(status_code=500, detail=resp["error"])
     
-    return resp   # order_id
+    return resp  
 
-# ---------------------------------------------------------------
-#                    OTROS ENDPOINTS
-# ---------------------------------------------------------------
+
 def finalize_order_controller(order_id: str):
     try:
         order = get_order_by_id(order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
         
-        #order is a dict i need to get the status
         order_status = (order.get("status") or "").upper()
 
         if order_status != "IN PROGRESS":
@@ -349,14 +323,12 @@ def assign_employee_to_order_controller(order_id: str, uid: str):
 
 def serve_order_item_controller(order_id: str, item_id: str):
     try:
-        # 1) Validaciones básicas de inputs
         if not order_id or not item_id:
             raise HTTPException(status_code=400, detail="order_id and item_id are required")
         
         if not isinstance(order_id, str) or not isinstance(item_id, str):
             raise HTTPException(status_code=400, detail="order_id and item_id must be strings")
 
-        # 2) Verificar que la orden exista
         try:
             order = get_order_by_id(order_id)
         except HTTPException:
@@ -364,11 +336,9 @@ def serve_order_item_controller(order_id: str, item_id: str):
         except Exception:
             raise HTTPException(status_code=404, detail="Order not found")
 
-        # 3) La orden debe estar IN PROGRESS
         if order.get("status") != "IN PROGRESS":
             raise HTTPException(status_code=400, detail="Order is not in progress")
 
-        # 4) Pasar al service
         return serve_order_item_service(order_id, item_id)
 
     except HTTPException:
@@ -377,8 +347,6 @@ def serve_order_item_controller(order_id: str, item_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-# Controllers SIN filtro
 def get_wait_time_by_product_controller():
     try:
         return get_wait_time_by_product_service()
@@ -391,8 +359,6 @@ def get_wait_time_by_day_controller():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# Controllers CON filtro de mes/año
 def get_wait_time_by_product_filtered_controller(month: str, year: str):
     try:
         return get_wait_time_by_product_filtered_service(month, year)
@@ -446,17 +412,13 @@ def register_external_order_controller(order: Order):
 
     incoming_status = (order.status or "").strip().upper()
 
-    # Si mandan cualquier cosa que no sea INACTIVE → NO SE ACEPTA
     if incoming_status != "INACTIVE":
         raise HTTPException(
             status_code=403,
             detail="External orders cannot set status IN PROGRESS. Forbidden."
         )
-
-    # Forzar EXTERNAL siempre
     order.status = "INACTIVE"
     order.tableNumber = 0
     order.employee = ""
 
-    # El resto de validaciones y timestamps BA lo hace register_new_order
     return register_new_order(order, order.employee)

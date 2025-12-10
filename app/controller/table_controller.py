@@ -9,7 +9,6 @@ def get_tables_controller():
     try:
         result = get_tables_service()
 
-        # Si el service devolvió {"error": "..."} → levantar 500
         if isinstance(result, dict) and "error" in result:
             raise HTTPException(
                 status_code=500,
@@ -17,37 +16,31 @@ def get_tables_controller():
             )
         return result
     except Exception:
-        # Si cualquier excepción se escapa del service
         raise HTTPException(
             status_code=500,
             detail="INTERNAL_ERROR_FETCHING_TABLES"
         )
 
-from fastapi import HTTPException
 
 def get_table_by_id_controller(table_id: str):
 
-    # Validación mínima de ID
+
     if not table_id or not str(table_id).strip():
         raise HTTPException(status_code=400, detail="Invalid table ID")
     try:
         table = get_table_by_id(table_id)
 
-        # El service devolvió error → 500
         if isinstance(table, dict) and "error" in table:
             raise HTTPException(
                 status_code=500,
                 detail="INTERNAL_ERROR_FETCHING_TABLE"
             )
-        # La mesa no existe
         if table is None:
             raise HTTPException(status_code=404, detail="Table not found")
         return table
     except HTTPException:
-        # Relevamos las HTTPException que tiramos arriba
         raise
     except Exception:
-        # Cualquier otra excepción inesperada
         raise HTTPException(
             status_code=500,
             detail="INTERNAL_ERROR_FETCHING_TABLE"
@@ -64,17 +57,14 @@ def update_table_status_controller(table_id: str, new_status: str):
         raise HTTPException(status_code=500, detail=str(e)) 
 
 async def get_order_for_table(table_id: str):
-    # Fetch the table
     table = await get_table_by_id(table_id)
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
 
-    # Check if there is an associated order
-    order = await get_order_by_id(table.order_id)  # Adjust this function based on your order retrieval logic
+    order = await get_order_by_id(table.order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Check if the order status is 'in progress'
     if order.status != 'in progress':
         raise HTTPException(status_code=400, detail="Order is not in progress")
 
@@ -100,15 +90,12 @@ def associate_order_with_table_controller(table_id: str, order_id: int):
     
     order = get_order_by_id(order_id)
 
-    # 1. Si vino None → no existe
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # 2. Si el service devolvió {"error": "..."} → error interno
     if isinstance(order, dict) and "error" in order:
         raise HTTPException(status_code=500, detail="INTERNAL_ERROR_FETCHING_ORDER")
 
-    # 3. AHORA EL EDITOR YA SABE QUE ORDER ES DICT → .get() FUNCIONA
     if order.get("status") != "IN PROGRESS":
         raise HTTPException(status_code=400, detail="Order is not IN_PROGRESS")
     

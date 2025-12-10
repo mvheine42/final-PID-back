@@ -1,5 +1,5 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo  # Python 3.9+
+from zoneinfo import ZoneInfo
 
 BA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -30,14 +30,11 @@ def parse_any_iso_to_ba_naive(date_str: str) -> datetime:
     if not date_str:
         raise ValueError("Empty date")
 
-    # Normalizamos la Z a +00:00 para que fromisoformat la entienda
     ds = date_str.replace("Z", "+00:00")
 
     dt = datetime.fromisoformat(ds)
 
-    # Si ya tiene tz, la traigo a BA y le saco tzinfo
     if dt.tzinfo is not None:
         return dt.astimezone(BA_TZ).replace(tzinfo=None)
 
-    # Si no tiene tz, asumimos que ya vino en BA
     return dt

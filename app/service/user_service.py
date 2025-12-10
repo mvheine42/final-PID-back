@@ -3,7 +3,6 @@ from app.db.firebase import db
 import firebase_admin
 from firebase_admin import auth 
 
-# Crear un nuevo usuario en Firestore
 def create_user(user_data):
     try:
         doc_ref = db.collection("users").document(user_data.uid)
@@ -17,28 +16,23 @@ def create_user(user_data):
         })
         return {"message": "User data saved successfully"}
     except Exception as e:
-        print(f"Error creating user: {str(e)}")  # Add logging
+        print(f"Error creating user: {str(e)}")
         return {"error": str(e)}
 
-# Obtener un usuario por su email
 def get_user_by_email(email):
     try:
         user = auth.get_user_by_email(email)
-        return {"uid": user.uid, "email": user.email}  # Retorna el UID del usuario
+        return {"uid": user.uid, "email": user.email}  
     except firebase_admin.auth.UserNotFoundError:
         return None
     except Exception as e:
         return {"error": str(e)}
     
 
-# Función para manejar la recuperación de contraseña
 def forgot_password(email):
     try:
-        # Check if user exists in Firebase Auth
         auth.get_user_by_email(email)
-        # Generate password reset link
         reset_link = auth.generate_password_reset_link(email)
-        # In production, you would send this link via email
         return {"message": "Password reset link sent", "link": reset_link}
     except firebase_admin.auth.UserNotFoundError:
         return {"error": "Email not found"}
@@ -47,31 +41,27 @@ def forgot_password(email):
     
 def user_by_id(uid):
     try:
-        # Referencia al documento del usuario
         user_ref = db.collection('users').document(uid)
-        user_doc = user_ref.get()  # Obtener el documento
+        user_doc = user_ref.get()
         
-        if user_doc.exists:  # Verificar si el documento existe
-            user_data = user_doc.to_dict()  # Obtener datos como un diccionario
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
             
-            # Obtener el nivel del usuario
             level_id = user_data.get("level")
             if level_id:
-                # Referencia al documento del nivel
                 level_ref = db.collection('levels').document(level_id)
-                level_doc = level_ref.get()  # Obtener el documento del nivel
+                level_doc = level_ref.get()
                 
-                if level_doc.exists:  # Verificar si el documento del nivel existe
-                    level_data = level_doc.to_dict()  # Obtener datos del nivel
-                    # Crear una lista que contenga el ID y el nombre del nivel
+                if level_doc.exists:
+                    level_data = level_doc.to_dict()
                     user_data['level'] = {
-                        'id': level_id,  # ID del nivel
-                        'name': level_data.get("name")  # Nombre del nivel
+                        'id': level_id,
+                        'name': level_data.get("name")
                     }
             
-            return user_data  # Retornar los datos del usuario, ahora con el nivel incluido
+            return user_data 
         else:
-            return None  # Usuario no existe - esto es normal durante el registro
+            return None
     except Exception as e:
         return {"error": str(e)}
 

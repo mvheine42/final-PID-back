@@ -1,9 +1,6 @@
 from app.db.firebase import db
 
 
-# -------------------------------------------------------
-#  ID AUTOINCREMENTAL
-# -------------------------------------------------------
 def get_next_product_id_from_existing():
     try:
         products = db.collection('products').stream()
@@ -13,16 +10,12 @@ def get_next_product_id_from_existing():
         return {"error": f"Error retrieving next ID: {str(e)}"}
 
 
-# -------------------------------------------------------
-#  CREATE PRODUCT
-# -------------------------------------------------------
 def create_product(product_data):
     try:
         next_id = get_next_product_id_from_existing()
         if isinstance(next_id, dict) and "error" in next_id:
             return next_id
 
-        # siempre almacenar category como string
         if "category" in product_data:
             product_data["category"] = str(product_data["category"])
 
@@ -34,10 +27,6 @@ def create_product(product_data):
     except Exception as e:
         return {"error": str(e)}
 
-
-# -------------------------------------------------------
-#  GET PRODUCTS
-# -------------------------------------------------------
 def products():
     try:
         ref = db.collection('products').stream()
@@ -54,10 +43,6 @@ def products():
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  UPDATE PRICE
-# -------------------------------------------------------
 def update_product_newprice(product_id: str, new_price):
     try:
         product_ref = db.collection('products').document(product_id)
@@ -73,9 +58,6 @@ def update_product_newprice(product_id: str, new_price):
         return {"error": str(e)}
 
 
-# -------------------------------------------------------
-#  UPDATE DESCRIPTION
-# -------------------------------------------------------
 def update_product_newdescription(product_id, new_description):
     try:
         product_ref = db.collection('products').document(product_id)
@@ -91,10 +73,6 @@ def update_product_newdescription(product_id, new_description):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  UPDATE CATEGORIES
-# -------------------------------------------------------
 def update_product_newcategories(product_id, new_categories):
     try:
         product_ref = db.collection("products").document(product_id)
@@ -110,10 +88,6 @@ def update_product_newcategories(product_id, new_categories):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  DELETE PRODUCT
-# -------------------------------------------------------
 def delete_product(product_id: str):
     try:
         product_ref = db.collection("products").document(product_id)
@@ -129,10 +103,6 @@ def delete_product(product_id: str):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  GET PRODUCT BY ID
-# -------------------------------------------------------
 def product_by_id(product_id: str):
     try:
         ref = db.collection("products").document(product_id)
@@ -150,10 +120,6 @@ def product_by_id(product_id: str):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  ADD CALORIES
-# -------------------------------------------------------
 def add_calories(product_id: str, calories: float):
     try:
         ref = db.collection("products").document(product_id)
@@ -169,15 +135,10 @@ def add_calories(product_id: str, calories: float):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  CHECK IF NAME EXISTS
-# -------------------------------------------------------
 def check_product_name_exists(product_name: str):
     try:
         query = db.collection("products").where("name", "==", product_name).stream()
 
-        # stream solo se puede consumir una vez → convierto a lista
         results = list(query)
 
         return len(results) > 0
@@ -186,13 +147,8 @@ def check_product_name_exists(product_name: str):
         return {"error": f"Error checking if product name exists: {str(e)}"}
 
 
-
-# -------------------------------------------------------
-#  GET PRODUCTS BY CATEGORY
-# -------------------------------------------------------
 def get_products_by_category(category_ids_str: str):
     try:
-        # NORMALIZAR input: split POR COMA, siempre.
         category_ids = [c.strip() for c in category_ids_str.split(",") if c.strip()]
 
         ref = db.collection("products").stream()
@@ -202,11 +158,9 @@ def get_products_by_category(category_ids_str: str):
             data = p.to_dict()
             data["id"] = p.id
 
-            # NORMALIZAR categorías del producto
             product_categories_raw = str(data.get("category", ""))
             product_categories = [c.strip() for c in product_categories_raw.split(",") if c.strip()]
 
-            # MATCH REAL
             if any(cat in product_categories for cat in category_ids):
                 filtered.append(data)
 
@@ -218,11 +172,6 @@ def get_products_by_category(category_ids_str: str):
     except Exception as e:
         return {"error": str(e)}
 
-
-
-# -------------------------------------------------------
-#  PRODUCTS IN IN-PROGRESS ORDERS
-# -------------------------------------------------------
 def check_product_in_in_progress_orders():
     try:
         orders_ref = db.collection("orders")
@@ -243,11 +192,6 @@ def check_product_in_in_progress_orders():
     except Exception as e:
         return {"error": str(e)}
 
-
-
-# -------------------------------------------------------
-#  UPDATE STOCK (ADD)
-# -------------------------------------------------------
 def update_stock(product_id: str, new_stock: str):
     try:
         product_ref = db.collection("products").document(product_id)
@@ -272,10 +216,6 @@ def update_stock(product_id: str, new_stock: str):
         return {"error": str(e)}
 
 
-
-# -------------------------------------------------------
-#  LOWER STOCK (SUBTRACT)
-# -------------------------------------------------------
 def lower_stock(product_id: str, new_stock: str):
     try:
         product_ref = db.collection("products").document(product_id)

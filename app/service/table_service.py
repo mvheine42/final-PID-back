@@ -1,5 +1,5 @@
 from app.db.firebase import db
-from fastapi import HTTPException # <-- Importante, lo estabas usando
+from fastapi import HTTPException
 
 def get_tables_service():
     """
@@ -39,32 +39,26 @@ def update_table_status(table_id: str, new_status: str):
         except Exception as e:
             return {"error": str(e)}
 
-# ---
-# --- ¡AQUÍ ESTÁ LA FUNCIÓN CORREGIDA! ---
-# ---
+
 def associate_order_with_table_service(table_id: str, order_id: int):
     """
     Servicio para asociar una orden y poner la mesa en 'BUSY'.
     """
     try:
-        print(f"🔵 SERVICE: table_id={table_id}, order_id={order_id}, type(order_id)={type(order_id)}")
         
         table_ref = db.collection('tables').document(table_id)
         table_doc = table_ref.get()
         
         if not table_doc.exists:
-            print("❌ Table not found")
             return {"error": "Table not found"}
         
         table_data = table_doc.to_dict()
         current_status = table_data.get("status")
         
-        print(f"🟢 Table status: {current_status}")
         
         if current_status not in ("FREE", "RESERVED"):
             return {"error": f"La mesa está '{current_status}' y no se le puede asignar una orden."}
         
-        print(f"🟡 About to update table with order_id={order_id}")
         
         table_ref.update({
             "order_id": order_id, 
@@ -72,11 +66,9 @@ def associate_order_with_table_service(table_id: str, order_id: int):
             "status": "BUSY"
         })
         
-        print("✅ Update successful")
         return {"message": "Order associated with table successfully"}
         
     except Exception as e:
-        print(f"💥 ERROR: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
@@ -97,25 +89,20 @@ def close_table_service(table_id: str):
         if table_data.get("status") != "BUSY":
             raise HTTPException(status_code=400, detail=f"La mesa no está 'Ocupada', no se puede cerrar. Estado actual: {table_data.get('status')}")
 
-        # --- NUEVA VALIDACIÓN DE SEGURIDAD ---
         order_id = table_data.get("order_id")
         if order_id:
-            # Buscamos la orden asociada
             order_ref = db.collection('orders').document(str(order_id))
             order_doc = order_ref.get()
             
             if order_doc.exists:
                 items = order_doc.to_dict().get("orderItems", [])
-                # Filtramos los que NO tienen fecha de servido
                 pending_items = [i for i in items if not i.get("served_at")]
                 
                 if pending_items:
-                    # Si quedó alguno, explotamos (Error 400)
                     raise HTTPException(
                         status_code=400, 
                         detail=f"No se puede cerrar: Hay {len(pending_items)} ítems sin servir."
                     )
-        # -------------------------------------
 
         table_ref.update({
             "status": "FINISHED",
@@ -140,7 +127,6 @@ def clean_table_service(table_id: str):
         if not table_doc.exists:
             raise HTTPException(status_code=404, detail="Table not found")
 
-        # --- ¡VALIDACIÓN AÑADIDA! ---
         table_data = table_doc.to_dict()
         if table_data.get("status") != "FINISHED":
             raise HTTPException(status_code=400, detail=f"La mesa no está 'Terminada', no se puede limpiar. Estado actual: {table_data.get('status')}")

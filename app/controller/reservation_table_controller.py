@@ -58,7 +58,6 @@ def assign_reservation_to_table_controller(table_id: str, reservation_id: int):
 
     if "error" in result:
         err = result["error"]
-        # Mapear errores a HTTP status
         if err in ("Table not found", "Reservation not found"):
             raise HTTPException(status_code=404, detail=err)
         if err in ("TABLE_BUSY", "TABLE_RESERVED_OTHER"):
