@@ -53,7 +53,7 @@ def make_reservation_controller(reservation: Reservation):
         if len(name) < 2:
             raise HTTPException(status_code=400, detail="Customer name is too short")
 
-        if len(name) > 60:
+        if len(name) > 20:
             raise HTTPException(status_code=400, detail="Customer name is too long")
 
         if reservation.amountOfPeople < 1 or reservation.amountOfPeople > 4:
